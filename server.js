@@ -18,11 +18,14 @@ const PLAYER_W = 34;
 const PLAYER_H = 38;
 const PORTAL_REARM_DIST = 10; // must move this far beyond the exit's radius before it works again
 
-// Maps share the world size. Platform tiers are 85px apart (max jump is ~138px)
+// Maps use WORLD unless they set their own `world` size. Platform tiers are 85px apart (max jump is ~138px)
 // and staggered so every tier is reachable. Black-hole portals come in linked
 // pairs (0<->1, 2<->3, …): touch the middle of one and you pop out of the other
 // with your speed intact. `theme` picks the look in public/maps.js.
-const ground = { x: 0, y: 662, w: 1248, h: 40, ground: true };
+const groundFor = (world) => ({ x: 0, y: world.height - 40, w: world.width, h: 40, ground: true });
+const ground = groundFor(WORLD);
+const BIG_WORLD = { width: 1600, height: 900 };
+const bigGround = groundFor(BIG_WORLD);
 // `move` makes a platform glide back and forth: it eases from (x, y) to
 // (x + dx, y + dy) and back once every `period` seconds.
 const plat = (x, y, w, move) => ({ x, y, w, h: 16, ...(move && { move }) });
@@ -31,6 +34,9 @@ const portalOn = (x, platformY) => ({ x, y: platformY - 30, r: 24 });
 // Launch height is power² / (2 × GRAVITY): 1300 ≈ 385px, about four tiers.
 const PAD_W = 40;
 const padOn = (x, platformY, power = 1300) => ({ x, y: platformY, w: PAD_W, power });
+// Traps are sticky patches on a platform's top surface: step in one and you're
+// slowed for a few seconds.
+const trapOn = (x, platformY, w) => ({ x, y: platformY, w });
 const mirror = (list) => list.map((pl) => plat(WORLD.width - pl.x - pl.w, pl.y, pl.w));
 
 const NIGHT_STAIRS = [plat(40, 577, 140), plat(200, 492, 140), plat(40, 407, 140), plat(200, 322, 140), plat(40, 237, 140)];
@@ -114,9 +120,79 @@ const MAPS = {
     powerupSpots: [[115, 577], [1133, 577], [624, 407], [370, 322], [878, 322], [624, 237]],
     spawns: [120, 1120, 380, 870, 300, 1040, 490, 740],
   },
+  frosty: {
+    name: 'Frosty Peaks',
+    theme: 'snow',
+    world: BIG_WORLD,
+    platforms: [
+      bigGround,
+      plat(100, 775, 200), plat(700, 775, 200), plat(1300, 775, 200),
+      plat(380, 690, 180), plat(1040, 690, 180),
+      plat(60, 605, 180), plat(650, 605, 300), plat(1360, 605, 180),
+      plat(300, 520, 180), plat(1120, 520, 180),
+      plat(40, 435, 170), plat(560, 435, 160), plat(880, 435, 160), plat(1390, 435, 170),
+      plat(270, 350, 180), plat(1150, 350, 180),
+      plat(60, 265, 160), plat(700, 265, 200), plat(1380, 265, 160),
+      plat(330, 180, 170), plat(1100, 180, 170),
+      plat(720, 95, 160), // the summit
+      plat(520, 520, 110, { dx: 450, dy: 0, period: 6 }), // shuttle across the middle
+      plat(520, 180, 100, { dx: 460, dy: 0, period: 5 }), // shuttle under the summit
+    ],
+    portals: [
+      // Two crossing pairs: ground left <-> high right, ground right <-> high left
+      portalOn(400, 860), portalOn(1460, 265),
+      portalOn(1250, 860), portalOn(140, 265),
+    ],
+    pads: [
+      padOn(80, 860, 1500), // left wall -> left ledge, five tiers up
+      padOn(1480, 860, 1500), // right wall -> right ledge
+    ],
+    traps: [
+      trapOn(1080, 860, 110), // slush on the ground
+      trapOn(760, 605, 80), // middle of the big ledge
+      trapOn(320, 350, 90),
+    ],
+    powerupSpots: [[200, 775], [700, 605], [1450, 605], [130, 435], [800, 265], [800, 95], [390, 350], [1240, 350]],
+    spawns: [180, 1340, 520, 1000, 290, 900, 640, 1410],
+  },
+  jungle: {
+    name: 'Jungle Ruins',
+    theme: 'jungle',
+    world: BIG_WORLD,
+    platforms: [
+      bigGround,
+      plat(60, 775, 160), plat(470, 775, 240), plat(890, 775, 240), plat(1380, 775, 160),
+      plat(240, 690, 150), plat(1210, 690, 150),
+      plat(30, 605, 170), plat(560, 605, 480), plat(1400, 605, 170), // long stone bridge in the middle
+      plat(250, 520, 160), plat(1190, 520, 160),
+      plat(40, 435, 160), plat(500, 435, 180), plat(920, 435, 180), plat(1400, 435, 160),
+      plat(250, 350, 170), plat(1180, 350, 170),
+      plat(40, 265, 150), plat(600, 265, 400), plat(1410, 265, 150), // temple roof
+      plat(260, 180, 160), plat(720, 180, 160), plat(1180, 180, 160),
+      plat(760, 840, 80, { dx: 0, dy: -560, period: 8 }), // lift up through the temple
+      plat(440, 95, 120, { dx: 600, dy: 0, period: 7 }), // glider across the canopy
+    ],
+    portals: [
+      portalOn(150, 860), portalOn(950, 265), // ground left <-> temple roof
+      portalOn(1450, 860), portalOn(115, 265), // ground right <-> high left
+    ],
+    pads: [
+      padOn(300, 860), // ground -> left ledges
+      padOn(1260, 860), // ground -> right ledges
+    ],
+    traps: [
+      trapOn(690, 860, 130), // mud pit on the ground
+      trapOn(600, 605, 90), // both ends of the bridge
+      trapOn(910, 605, 90),
+    ],
+    powerupSpots: [[140, 775], [1460, 775], [800, 605], [590, 435], [1010, 435], [330, 180], [1260, 180], [800, 180]],
+    spawns: [220, 1360, 560, 1080, 420, 1180, 960, 1530],
+  },
 };
+for (const map of Object.values(MAPS)) map.world ??= WORLD;
 let mapId = 'meadow';
 const currentMap = () => MAPS[mapId];
+const currentWorld = () => currentMap().world;
 
 // Live platform positions for the current map (moving ones change every tick)
 let livePlatforms = [];
@@ -184,6 +260,8 @@ const BOOTS_SPEED_MULT = 1.5;
 const POWERUP_FIRST_DELAY = 5; // seconds into the round before the first one appears
 const POWERUP_RESPAWN = 8; // seconds after a pickup before the next one appears
 const POWERUP_R = 16; // pickup radius
+const SLOW_SECONDS = 3; // how long a trap slows you after you step out of it
+const SLOW_MULT = 0.5; // running, sliding and air-dash speed while slowed
 const MOMENTUM_DECAY = 1400; // how fast leftover dash speed bleeds back to running speed
 
 // ---------------------------------------------------------------------------
@@ -309,6 +387,8 @@ function snapshot() {
       jc: p.jumps, // jump counter, lets clients play a jump sound
       bc: p.boosts, // jump-pad launch counter
       sp: Math.max(0, Math.round((p.speedUntil - t) * 10) / 10), // speed boots time left (s)
+      sl: Math.max(0, Math.round((p.slowUntil - t) * 10) / 10), // slowed by a trap, time left (s)
+      tc: p.trapHits, // trap counter, lets clients splash + play a sound
       iv: Math.max(0, Math.round((p.cloakUntil - t) * 10) / 10), // invisibility time left (s)
       dm: p.dashMode === 'slide' ? 1 : p.dashMode === 'air' ? 2 : 0,
       dc: p.dashes,
@@ -335,7 +415,7 @@ function resetBody(p, spawnX) {
   p.vx = 0;
   p.vy = 0;
   p.onGround = true;
-  p.facing = spawnX < WORLD.width / 2 ? 1 : -1;
+  p.facing = spawnX < currentWorld().width / 2 ? 1 : -1;
   p.coyote = 0;
   p.jumpBuffer = 0;
   p.jumpWasDown = true; // holding jump through the countdown shouldn't auto-jump
@@ -347,6 +427,9 @@ function resetBody(p, spawnX) {
   p.boosts = p.boosts ?? 0; // counter so clients can animate the pad + play a sound
   p.speedUntil = 0; // speed boots active until this time
   p.cloakUntil = 0; // invisible until this time
+  p.slowUntil = 0; // slowed by a trap until this time
+  p.inTrap = false;
+  p.trapHits = p.trapHits ?? 0;
   p.jumps = p.jumps ?? 0;
   p.dashMode = null; // null | 'slide' | 'air'
   p.dashReadyAt = 0;
@@ -373,6 +456,23 @@ function checkPads(p) {
   }
 }
 
+// Standing in a trap keeps you slowed; the slow wears off SLOW_SECONDS after you leave it
+function checkTraps(p, t) {
+  let inTrap = false;
+  if (p.onGround) {
+    for (const trap of currentMap().traps || []) {
+      const onTop = Math.abs(p.y + PLAYER_H - trap.y) < 1;
+      const overlapsX = p.x + PLAYER_W > trap.x + 6 && p.x < trap.x + trap.w - 6;
+      if (onTop && overlapsX) inTrap = true;
+    }
+  }
+  if (inTrap) {
+    if (!p.inTrap) p.trapHits++;
+    p.slowUntil = t + SLOW_SECONDS;
+  }
+  p.inTrap = inTrap;
+}
+
 function distToPortal(p, portal) {
   return Math.hypot(p.x + PLAYER_W / 2 - portal.x, p.y + PLAYER_H / 2 - portal.y);
 }
@@ -386,7 +486,7 @@ function checkPortals(p) {
     if (i === p.portalLock || distToPortal(p, PORTALS[i]) >= PORTALS[i].r) continue;
     const exitIndex = i ^ 1;
     const exit = PORTALS[exitIndex];
-    p.x = Math.max(0, Math.min(WORLD.width - PLAYER_W, exit.x - PLAYER_W / 2));
+    p.x = Math.max(0, Math.min(currentWorld().width - PLAYER_W, exit.x - PLAYER_W / 2));
     p.y = exit.y - PLAYER_H / 2;
     p.onGround = false;
     p.portalLock = exitIndex;
@@ -477,10 +577,12 @@ function removePlayer(id) {
 // Physics
 // ---------------------------------------------------------------------------
 function stepPlayer(p, t) {
+  const world = currentWorld();
+  const slow = t < p.slowUntil ? SLOW_MULT : 1;
   // Ride a moving platform: get carried by however far it moved this tick
   const under = p.onGround ? livePlatforms[p.standingOn] : null;
   if (under && (under.dx || under.dy)) {
-    p.x = Math.max(0, Math.min(WORLD.width - PLAYER_W, p.x + under.dx));
+    p.x = Math.max(0, Math.min(world.width - PLAYER_W, p.x + under.dx));
     p.y += under.dy;
   }
 
@@ -507,13 +609,13 @@ function stepPlayer(p, t) {
   // Horizontal
   if (p.dashMode === 'slide') {
     const k = (t - p.dashStart) / SLIDE_SECONDS;
-    p.vx = p.dashDir * (SLIDE_SPEED + (SLIDE_END_SPEED - SLIDE_SPEED) * k);
+    p.vx = p.dashDir * (SLIDE_SPEED + (SLIDE_END_SPEED - SLIDE_SPEED) * k) * slow;
   } else if (p.dashMode === 'air') {
-    p.vx = p.dashDir * AIRDASH_SPEED;
+    p.vx = p.dashDir * AIRDASH_SPEED * slow;
   } else if (dir !== 0) {
     p.facing = dir;
     const boots = t < p.speedUntil;
-    const runSpeed = boots ? RUN_SPEED * BOOTS_SPEED_MULT : RUN_SPEED;
+    const runSpeed = (boots ? RUN_SPEED * BOOTS_SPEED_MULT : RUN_SPEED) * slow;
     if (p.vx * dir > runSpeed) {
       // Still carrying extra speed from a dash: ease back down to running speed
       p.vx = dir * Math.max(runSpeed, p.vx * dir - MOMENTUM_DECAY * DT);
@@ -553,8 +655,8 @@ function stepPlayer(p, t) {
   if (p.x < 0) {
     p.x = 0;
     p.vx = 0;
-  } else if (p.x > WORLD.width - PLAYER_W) {
-    p.x = WORLD.width - PLAYER_W;
+  } else if (p.x > world.width - PLAYER_W) {
+    p.x = world.width - PLAYER_W;
     p.vx = 0;
   }
 
@@ -586,9 +688,10 @@ function stepPlayer(p, t) {
   }
   if (p.dashMode === 'slide' && !p.onGround) p.dashMode = null; // slid off a ledge
   if (p.dashMode === 'air' && p.onGround) p.dashMode = null; // landed mid-dash
-  if (p.y > WORLD.height) resetBody(p, pickRandom(currentMap().spawns)); // safety net
+  if (p.y > world.height) resetBody(p, pickRandom(currentMap().spawns)); // safety net
   if (phase === 'playing') {
     checkPads(p);
+    checkTraps(p, t);
     checkPortals(p);
   }
 }

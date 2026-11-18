@@ -15,21 +15,22 @@ If macOS asks whether to allow incoming connections for `node`, click **Allow**.
 ## Play
 
 - Enter a name and **Join**. Once 2+ players are in, anyone can press **Start game**.
-- Any joined player can pick the map (Meadow, Starry Night, Sunset Canyon) and round length (30s – 3 min; default 1 min) in the lobby.
+- Any joined player can pick the map (Meadow, Starry Night, Sunset Canyon, and the bigger Frosty Peaks and Jungle Ruins, marked **BIG**) and round length (30s – 3 min; default 1 min) in the lobby.
 - A random player starts as **IT**. Touch someone to make them IT. Whoever is IT when the clock hits 0 loses.
 - A newly tagged player is frozen for 1s, and the tagger can't be tagged straight back for 2s.
 - Keyboard: ← → to run, ↑ or Space to jump (WASD also works). Tap jump for a short hop, hold for a high jump.
 - **Dash** (Shift or ↓; ≫ button on touch): on the ground it's a fast, low slide (handy for slipping past IT); in the air it's a short level burst across gaps. 1.5s cooldown, shown as a ring on the button / meter in the corner. Jump out of a slide to keep its speed.
 - iPhone/iPad: play in landscape with the on-screen ◀ ▶, ⤒ and ≫ buttons. Tip: Safari → Share → *Add to Home Screen* gives a full-screen view.
-- Moving platforms (studded, with a dashed rail showing their path) carry you along when you stand on them: an elevator and a top shuttle on Meadow, twin sky shuttles on Starry Night, and a raft across the top of Sunset Canyon.
-- Jump pads (red-capped springs) launch you about four levels straight up: two on Meadow, a "tower express" up the middle of Starry Night, and one by each wall in Sunset Canyon.
+- Moving platforms (studded, with a dashed rail showing their path) carry you along when you stand on them: an elevator and a top shuttle on Meadow, twin sky shuttles on Starry Night, a raft across the top of Sunset Canyon, two shuttles on Frosty Peaks, and a lift up the temple plus a canopy glider on Jungle Ruins.
+- Jump pads (red-capped springs) launch you about four levels straight up: two on Meadow, a "tower express" up the middle of Starry Night, one by each wall in Sunset Canyon, two extra-strong wall pads on Frosty Peaks, and two on Jungle Ruins.
 - **Power-ups**: one appears on a random ledge 5s into the round, and a new one appears elsewhere 8s after each pickup. Anyone can grab them, IT included. It's randomly either:
   - **Speed boots** 👟 (gold bubble): run 50% faster for 6s, with a gold speed trail.
   - **Invisibility cloak** 👻 (purple bubble): for 5s you're completely invisible to other players while running along the ground; standing still or jumping fades in a faint shimmer. No name, IT badge, trail or off-screen arrow either way. You see yourself see-through.
+- **Traps** (Frosty Peaks and Jungle Ruins): sticky puddles of slush or mud with a snail on them. Step in one and you run, slide and air-dash at half speed while you're in it and for 3s after you leave it. A 🐌 timer shows how long is left.
 - Black-hole portals come in linked pairs (same color = linked). Touch the middle of one to pop out of the other with your speed intact (jump over it to avoid it).
 - People who join mid-round watch and play from the next round.
 - After each round a scoreboard shows everyone's time as IT, tags made, and session wins (🏆). Everyone except the loser gets a win. Wins are kept by name until the server restarts.
-- Sound effects for tags, jumps, landings, the 3-2-1-GO countdown and the last 5 seconds.
+- Sound effects for tags, jumps, landings, traps, the 3-2-1-GO countdown and the last 5 seconds.
 - Music: a chill lobby loop, an upbeat in-game loop that speeds up in the last 10s, and a win/lose jingle. Toggle with the 🔊 button or **M**. On iPhone, the ring/silent switch must be on ring to hear it.
 
 ## Code
@@ -37,7 +38,7 @@ If macOS asks whether to allow incoming connections for `node`, click **Allow**.
 - `server.js` runs the game: static files, WebSocket, physics, and tag rules at 60 ticks/s. Tuning constants are at the top.
 - `public/client.js` handles the lobby UI, input (keyboard and touch), and canvas rendering with snapshot interpolation.
 - `public/characters.js` draws the cartoon characters.
-- `public/maps.js` draws each map's theme (sky, scenery, platforms, portals). Map layouts live in `MAPS` in `server.js`.
+- `public/maps.js` draws each map's theme (sky, scenery, platforms, portals). Map layouts live in `MAPS` in `server.js`; a map can set its own `world` size.
 - `public/music.js` generates the chiptune music with the Web Audio API (no audio files).
 
 `ROUND_SECONDS=20 npm start` sets the starting round length (any number of seconds, handy for testing). The lobby choices are `ROUND_OPTIONS` in `server.js`. `PORT=4000 npm start` changes the port.

@@ -35,6 +35,8 @@
   const saveName = (n) => {
     try { localStorage.setItem('tagName', n); } catch {}
   };
+  const currentMap = () => maps[room.mapId] || Object.values(maps)[0];
+  const worldOf = (map) => map?.world || world; // maps can be bigger than the default world
   const playerInfo = (id) => room.players.find((p) => p.id === id);
   const nameOf = (id) => playerInfo(id)?.name ?? '???';
 
@@ -356,9 +358,15 @@
       thumb.height = 68 * dpr;
       const g = thumb.getContext('2d');
       g.scale(dpr, dpr);
-      drawMapPreview(g, map, world, 120, 68);
+      drawMapPreview(g, map, worldOf(map), 120, 68);
       const label = document.createElement('span');
       label.textContent = map.name;
+      if (worldOf(map).width > world.width) {
+        const big = document.createElement('span');
+        big.className = 'map-badge';
+        big.textContent = 'BIG';
+        btn.append(big);
+      }
       btn.append(thumb, label);
       btn.addEventListener('click', () => send({ t: 'map', id }));
       box.append(btn);
@@ -528,6 +536,7 @@
   function updateCamera(state, dt) {
     const target = state.players.find((p) => p.id === cameraTargetId(state));
     if (!target) return;
+    const world = worldOf(currentMap());
     const tx = clamp(target.x + pSize.w / 2 - view.width / 2, 0, Math.max(0, world.width - view.width));
     const ty = clamp(target.y + pSize.h / 2 - view.height * 0.55, 0, Math.max(0, world.height - view.height));
     if (!cam.ready) {
@@ -541,7 +550,6 @@
     }
   }
 
-  const currentMap = () => maps[room.mapId] || Object.values(maps)[0];
 
   // The map's platforms with moving ones placed where the latest snapshot says
   function livePlatforms(map, state) {
@@ -570,6 +578,8 @@
   function drawPlayers(state, time) {
     const dt = Math.min(0.1, Math.max(0, time - lastShimmerTime));
     lastShimmerTime = time;
+    const world = worldOf(currentMap());
+    const trapColors = themeFor(currentMap()).trap;
     // Draw IT last so it's always on top
     const list = [...state.players].sort((a, b) => (a.id === state.itId) - (b.id === state.itId));
     for (const p of list) {
@@ -621,6 +631,7 @@
           ctx.stroke();
         }
       }
+      if (p.sl > 0 && !hidden) drawStuckFeet(ctx, trapColors, p, cx, feetY, time);
       if (p.dm === 1) {
         // Slide: squashed toward the feet, kicking up dust
         ctx.fillStyle = 'rgba(255, 255, 255, 0.45)';
@@ -689,8 +700,22 @@
     }
   }
 
+  // Slowed by a trap: goo clinging to the feet and dripping off
+  function drawStuckFeet(g, colors, p, cx, feetY, time) {
+    if (!colors) return;
+    g.fillStyle = colors.goo;
+    fillEllipse(g, cx, feetY - 2, 19, 5);
+    for (let k = 0; k < 3; k++) {
+      const dx = (k - 1) * 11;
+      const ph = (time * 1.2 + k * 0.37 + p.id * 0.13) % 1;
+      fillEllipse(g, cx + dx, feetY - 4 + ph * 9, 3 - ph * 1.5, 4 - ph * 2);
+    }
+    g.fillStyle = colors.light;
+    fillEllipse(g, cx - 6, feetY - 4, 5, 1.5);
+  }
+
   // ---- Sound effects driven by game state ----
-  const heard = { sp: 0, iv: 0, dc: null, jc: null, g: null, count: null, tick: null, phase: null };
+  const heard = { sp: 0, iv: 0, sl: 0, tc: null, dc: null, jc: null, g: null, count: null, tick: null, phase: null };
 
   function detectSounds(state) {
     const me = state.players.find((p) => p.id === myId);
@@ -698,15 +723,18 @@
       if (heard.dc !== null && me.dc !== heard.dc) Music.sfx(me.dm === 2 ? 'airdash' : 'slide');
       if (heard.jc !== null && me.jc !== heard.jc) Music.sfx('jump');
       else if (heard.g === 0 && me.g === 1 && me.dm !== 1) Music.sfx('land');
-      const wornOff = (heard.sp > 0 && me.sp === 0) || (heard.iv > 0 && me.iv === 0);
+      if (heard.tc !== null && me.tc !== heard.tc) Music.sfx('splat');
+      const wornOff = (heard.sp > 0 && me.sp === 0) || (heard.iv > 0 && me.iv === 0) || (heard.sl > 0 && me.sl === 0);
       if (wornOff && state.phase === 'playing') Music.sfx('powerdown');
       heard.sp = me.sp;
       heard.iv = me.iv;
+      heard.sl = me.sl;
+      heard.tc = me.tc;
       heard.dc = me.dc;
       heard.jc = me.jc;
       heard.g = me.g;
     } else {
-      heard.jc = heard.g = heard.dc = null;
+      heard.jc = heard.g = heard.dc = heard.tc = null;
     }
 
     // 3-2-1 beeps, then GO!
@@ -747,6 +775,25 @@
       });
       padLaunchedAt[best] = performance.now();
       if (p.id === myId) Music.sfx('boing');
+    }
+  }
+
+  // ---- Traps: splash the one someone just stepped in ----
+  const trapSplashAt = [];
+  const lastTrapHits = new Map(); // player id -> trap counter last seen
+
+  function detectTrapSplashes(state) {
+    const traps = currentMap()?.traps || [];
+    for (const p of state.players) {
+      const prev = lastTrapHits.get(p.id);
+      lastTrapHits.set(p.id, p.tc);
+      if (prev === undefined || prev === p.tc || !traps.length || p.iv > 0) continue;
+      const cx = p.x + pSize.w / 2;
+      const feetY = p.y + pSize.h;
+      const dist = (t) => Math.abs(t.x + t.w / 2 - cx) + Math.abs(t.y - feetY) * 4;
+      let best = 0;
+      traps.forEach((t, i) => { if (dist(t) < dist(traps[best])) best = i; });
+      trapSplashAt[best] = performance.now();
     }
   }
 
@@ -906,7 +953,7 @@
     // Your power-up countdowns (speed boots, invisibility)
     const me = state.players.find((p) => p.id === myId);
     if (me && state.phase === 'playing') {
-      const active = [[drawBoot, me.sp], [drawGhost, me.iv]].filter(([, secs]) => secs > 0);
+      const active = [[drawBoot, me.sp], [drawGhost, me.iv], [drawSnail, me.sl]].filter(([, secs]) => secs > 0);
       active.forEach(([icon, secs], i) => {
         const y = 58 + i * 36;
         ctx.fillStyle = 'rgba(20, 26, 44, 0.8)';
@@ -939,6 +986,7 @@
       detectTeleports(state);
       detectSounds(state);
       detectPadLaunches(state);
+      detectTrapSplashes(state);
       updateCamera(state, dt);
     }
 
@@ -952,6 +1000,7 @@
     drawRails(ctx, map.platforms);
     drawPlatformsThemed(ctx, theme, livePlatforms(map, state));
     drawPads(ctx, map.pads || [], time, padLaunchedAt);
+    drawTraps(ctx, theme, map.traps || [], time, trapSplashAt);
     if (state?.pu) drawPowerupPickup(ctx, state.pu, time);
     drawPortalsThemed(ctx, map.portals, time, Math.max(0, (portalFlashUntil - now) / 400));
     if (state) drawPlayers(state, time);

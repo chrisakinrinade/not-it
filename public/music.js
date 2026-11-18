@@ -262,6 +262,10 @@ const Music = (() => {
       noise(t, 0.35, 0.04 * v, 5000, master);
     },
     powerdown: (t, v) => sweep(t, 900, 300, 0.25, 'triangle', 0.15 * v),
+    splat: (t, v) => {
+      noise(t, 0.18, 0.18 * v, 500, master);
+      sweep(t, 220, 70, 0.22, 'sine', 0.3 * v);
+    },
     tick: (t, v) => sweep(t, 1800, 1500, 0.04, 'square', 0.05 * v),
     beep: (t, v) => tone(t, 523, 0.15, 'square', 0.09 * v, master),
     go: (t, v) => tone(t, 1047, 0.4, 'square', 0.1 * v, master),

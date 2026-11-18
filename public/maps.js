@@ -16,6 +16,7 @@ const THEMES = {
     sun: { color: '#fff3bf', r: 34, fx: 0.917, fy: 0.13 },
     clouds: 'rgba(255, 255, 255, 0.85)',
     platform: { body: '#a0672f', top: '#51cf66', ground: '#8d5a2b', groundTop: '#51cf66', groundEdge: '#40c057' },
+    trap: { goo: '#7048e8', light: '#b197fc', bubble: '220, 210, 255' },
     scenery: drawMeadowHills,
   },
   night: {
@@ -24,6 +25,7 @@ const THEMES = {
     moon: { color: '#f1f3f5', r: 30, fx: 0.82, fy: 0.17 },
     clouds: 'rgba(170, 180, 220, 0.16)',
     platform: { body: '#4c566a', top: '#91a7ff', ground: '#2b3040', groundTop: '#5c6bc0', groundEdge: '#3b4a9a' },
+    trap: { goo: '#7048e8', light: '#b197fc', bubble: '220, 210, 255' },
     scenery: drawNightHills,
   },
   canyon: {
@@ -31,7 +33,25 @@ const THEMES = {
     sun: { color: '#ffe066', r: 70, fx: 0.62, fy: 0.6, glow: true },
     clouds: 'rgba(255, 225, 210, 0.7)',
     platform: { body: '#c2703d', top: '#f0a35e', ground: '#a0522d', groundTop: '#e8913a', groundEdge: '#c46a24' },
+    trap: { goo: '#7048e8', light: '#b197fc', bubble: '220, 210, 255' },
     scenery: drawMesas,
+  },
+  snow: {
+    sky: ['#8fc1ec', '#eef6ff'],
+    sun: { color: '#fffbe6', r: 30, fx: 0.18, fy: 0.14, glow: true },
+    clouds: 'rgba(255, 255, 255, 0.8)',
+    snowfall: true,
+    platform: { body: '#6f97bb', top: '#ffffff', ground: '#5b82a6', groundTop: '#f8fbff', groundEdge: '#cfe2f3' },
+    trap: { goo: '#5b7594', light: '#c5d6e8', bubble: '235, 243, 250' }, // slush
+    scenery: drawSnowPeaks,
+  },
+  jungle: {
+    sky: ['#2f7d4a', '#c8e9a0'],
+    sun: { color: '#fff9c4', r: 40, fx: 0.72, fy: 0.12, glow: true },
+    clouds: 'rgba(255, 255, 255, 0.3)',
+    platform: { body: '#7c858f', top: '#69db7c', ground: '#5c3d1e', groundTop: '#37b24d', groundEdge: '#2f9e44' },
+    trap: { goo: '#5e3b1c', light: '#a47148', bubble: '214, 170, 120' }, // mud
+    scenery: drawJungle,
   },
 };
 
@@ -97,6 +117,17 @@ function drawSkyLayer(g, theme, w, h, camX, camY, time) {
     fillEllipse(g, x - 9, y - 6, 6, 6);
     fillEllipse(g, x + 8, y + 7, 4.5, 4.5);
     fillEllipse(g, x + 10, y - 10, 3, 3);
+  }
+
+  if (theme.snowfall) {
+    g.fillStyle = 'rgba(255, 255, 255, 0.85)';
+    for (let i = 0; i < 70; i++) {
+      const speed = 18 + seeded(i + 300) * 30;
+      const x = (((seeded(i) * w + Math.sin(time * 0.8 + i) * 18 - camX * 0.2) % w) + w) % w;
+      const y = (((seeded(i + 50) * h + time * speed - camY * 0.2) % h) + h) % h;
+      const size = 1 + seeded(i + 400) * 1.8;
+      fillEllipse(g, x, y, size, size);
+    }
   }
 
   if (theme.clouds) {
@@ -165,9 +196,91 @@ function drawMesas(g, groundY) {
   mesa(1100, 200, 160, 30, '#d9622b');
 }
 
+function drawSnowPeaks(g, groundY, width) {
+  const peak = (cx, half, h, color, cap) => {
+    const top = groundY - h;
+    g.fillStyle = color;
+    g.beginPath();
+    g.moveTo(cx - half, groundY + 2);
+    g.lineTo(cx, top);
+    g.lineTo(cx + half, groundY + 2);
+    g.closePath();
+    g.fill();
+    // Snow cap with a zig-zag hem
+    const k = 0.32;
+    g.fillStyle = cap;
+    g.beginPath();
+    g.moveTo(cx, top);
+    g.lineTo(cx + half * k, top + h * k);
+    for (let j = 1; j <= 4; j++) {
+      g.lineTo(cx + half * k - (half * 2 * k * j) / 4, top + h * k + (j % 2 ? 12 : 0));
+    }
+    g.closePath();
+    g.fill();
+  };
+  // Far range, then near range
+  for (const [fx, half, h] of [[0.08, 330, 420], [0.42, 380, 520], [0.8, 360, 450]]) peak(width * fx, half, h, '#b3cbe3', '#f4f9ff');
+  for (const [fx, half, h] of [[0.25, 280, 300], [0.62, 300, 340], [0.97, 260, 260]]) peak(width * fx, half, h, '#86a9cb', '#ffffff');
+  // Snowy pines
+  for (const fx of [0.04, 0.07, 0.33, 0.52, 0.71, 0.74, 0.93]) {
+    const x = width * fx;
+    const hgt = 80 + seeded(fx * 100) * 40;
+    g.fillStyle = '#2f5d50';
+    for (let tier = 0; tier < 3; tier++) {
+      const ty = groundY - hgt + tier * hgt * 0.28;
+      const half = hgt * (0.14 + tier * 0.07);
+      g.beginPath();
+      g.moveTo(x - half, ty + hgt * 0.36);
+      g.lineTo(x, ty);
+      g.lineTo(x + half, ty + hgt * 0.36);
+      g.closePath();
+      g.fill();
+    }
+    g.fillStyle = 'rgba(255, 255, 255, 0.9)';
+    fillEllipse(g, x, groundY - hgt + 8, 5, 4);
+  }
+}
+
+function drawJungle(g, groundY, width) {
+  // Stepped temple silhouette in the middle
+  g.fillStyle = '#3e6b4c';
+  const cx = width / 2;
+  for (let step = 0; step < 6; step++) {
+    const half = 420 - step * 62;
+    const h = 70;
+    g.fillRect(cx - half, groundY - (step + 1) * h, half * 2, h + 2);
+  }
+  g.fillStyle = '#2d5239';
+  g.fillRect(cx - 40, groundY - 470, 80, 50); // shrine on top
+  g.fillRect(cx - 34, groundY - 100, 68, 100); // doorway
+  // Big tree trunks at the edges with leafy crowns
+  for (const [x, w] of [[50, 70], [width - 120, 70], [width * 0.3, 40], [width * 0.7, 40]]) {
+    g.fillStyle = '#4a3423';
+    g.fillRect(x, groundY - 520, w, 522);
+    g.fillStyle = '#2b6e3f';
+    fillEllipse(g, x + w / 2, groundY - 540, w * 2.2, 70);
+    fillEllipse(g, x + w / 2 - w, groundY - 500, w * 1.4, 50);
+    fillEllipse(g, x + w / 2 + w, groundY - 505, w * 1.4, 50);
+  }
+  // Hanging vines from the canopy
+  g.strokeStyle = '#2f9e44';
+  g.lineWidth = 3;
+  g.lineCap = 'round';
+  for (let i = 0; i < 14; i++) {
+    const x = ((i + 0.5) * width) / 14 + (seeded(i) - 0.5) * 60;
+    const len = 120 + seeded(i + 20) * 220;
+    g.beginPath();
+    g.moveTo(x, 0);
+    g.quadraticCurveTo(x + (seeded(i + 40) - 0.5) * 50, len / 2, x, len);
+    g.stroke();
+    g.fillStyle = '#51cf66';
+    for (let k = 1; k <= 3; k++) fillEllipse(g, x + (k % 2 ? 5 : -5), (len * k) / 4, 6, 3);
+  }
+}
+
 function drawScenery(g, theme, platforms) {
-  const groundY = platforms.find((pl) => pl.ground)?.y ?? 0;
-  theme.scenery?.(g, groundY);
+  const ground = platforms.find((pl) => pl.ground);
+  theme.scenery?.(g, ground?.y ?? 0, ground?.w ?? 0);
 }
 
 function drawPlatformsThemed(g, theme, platforms) {
@@ -250,6 +363,91 @@ function drawPads(g, pads, time, launchedAt = []) {
     g.fill();
     g.fillStyle = 'rgba(255, 255, 255, 0.55)';
     g.fillRect(x + 2, capY + 1, w - 4, 1.5);
+  });
+}
+
+/** A little snail centred on (x, y), scaled by s — the "slowed" icon. */
+function drawSnail(g, x, y, s = 1) {
+  g.save();
+  g.translate(x, y);
+  g.scale(s, s);
+  // Body and eye stalks
+  g.fillStyle = '#ffc078';
+  roundRectPath(g, -11, 2, 24, 6, 3);
+  g.fill();
+  fillEllipse(g, 10, 2, 4, 4);
+  g.strokeStyle = '#ffc078';
+  g.lineWidth = 1.6;
+  g.lineCap = 'round';
+  g.beginPath();
+  g.moveTo(9, 0);
+  g.lineTo(8, -7);
+  g.moveTo(11, 0);
+  g.lineTo(13, -7);
+  g.stroke();
+  g.fillStyle = '#343a40';
+  fillEllipse(g, 8, -7, 1.3, 1.3);
+  fillEllipse(g, 13, -7, 1.3, 1.3);
+  // Shell with a spiral
+  g.fillStyle = '#e8590c';
+  fillEllipse(g, -2, -1, 8, 8);
+  g.strokeStyle = '#ffe8cc';
+  g.lineWidth = 1.5;
+  g.beginPath();
+  g.arc(-2, -1, 5, -Math.PI / 2, Math.PI * 1.2);
+  g.stroke();
+  g.beginPath();
+  g.arc(-2, -1, 2, Math.PI, Math.PI * 2.6);
+  g.stroke();
+  g.restore();
+}
+
+/**
+ * Sticky traps (mud, slush…): a lumpy puddle on the platform top with bubbles
+ * and a snail warning. `splashAt[i]` (performance.now() ms) splashes trap i.
+ */
+function drawTraps(g, theme, traps, time, splashAt = []) {
+  const c = theme.trap;
+  if (!c) return;
+  const now = typeof performance !== 'undefined' ? performance.now() : 0;
+  traps.forEach((trap, i) => {
+    const { x, y, w } = trap;
+    const lumps = Math.max(3, Math.round(w / 22));
+    g.fillStyle = c.goo;
+    roundRectPath(g, x, y - 3, w, 10, 4);
+    g.fill();
+    for (let k = 0; k < lumps; k++) {
+      const lx = x + ((k + 0.5) * w) / lumps;
+      fillEllipse(g, lx, y - 2 + Math.sin(time * 2 + k * 1.7 + i) * 0.8, (w / lumps) * 0.7, 5);
+    }
+    // Drips over the front edge
+    for (const f of [0.22, 0.58, 0.85]) {
+      const len = 4 + Math.sin(time * 1.5 + f * 10 + i) * 2;
+      fillEllipse(g, x + w * f, y + 7 + len / 2, 2.5, 2 + len / 2);
+    }
+    g.fillStyle = c.light;
+    for (let k = 0; k < lumps; k += 2) fillEllipse(g, x + ((k + 0.35) * w) / lumps, y - 4, 4, 1.4);
+    // Bubbles rising and popping
+    g.lineWidth = 1.5;
+    for (let k = 0; k < 3; k++) {
+      const ph = (time * 0.7 + k * 0.33 + i * 0.21) % 1;
+      g.strokeStyle = `rgba(${c.bubble}, ${0.9 * (1 - ph)})`;
+      g.beginPath();
+      g.arc(x + w * (0.2 + 0.3 * k), y - 5 - ph * 7, 1.5 + ph * 2.5, 0, Math.PI * 2);
+      g.stroke();
+    }
+    drawSnail(g, x + w - 13, y - 10, 0.6);
+    // Splash when someone steps in
+    const since = (now - (splashAt[i] ?? -1e9)) / 1000;
+    if (since < 0.45) {
+      const k = since / 0.45;
+      g.fillStyle = c.goo;
+      for (let d = 0; d < 6; d++) {
+        const a = Math.PI * (0.15 + (0.7 * d) / 5);
+        const r = 10 + k * 26;
+        fillEllipse(g, x + w / 2 + Math.cos(a) * r * 1.4, y - 4 - Math.sin(a) * r + k * k * 20, 3.5 * (1 - k) + 1, 3.5 * (1 - k) + 1);
+      }
+    }
   });
 }
 
@@ -436,6 +634,7 @@ function drawMapPreview(g, map, world, w, h) {
   drawRails(g, map.platforms);
   drawPlatformsThemed(g, theme, map.platforms);
   drawPads(g, map.pads || [], 0.4);
+  drawTraps(g, theme, map.traps || [], 0.4);
   drawPortalsThemed(g, map.portals, 0.4);
   g.restore();
 }
