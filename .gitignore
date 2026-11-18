@@ -1,5 +1,4 @@
-node_modules
-.git
-.claude
-.dockerignore
-Dockerfile
+node_modules/
+.claude/
+.DS_Store
+*.log
