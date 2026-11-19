@@ -262,6 +262,11 @@ const Music = (() => {
       noise(t, 0.35, 0.04 * v, 5000, master);
     },
     powerdown: (t, v) => sweep(t, 900, 300, 0.25, 'triangle', 0.15 * v),
+    boom: (t, v) => {
+      noise(t, 0.7, 0.5 * v, 40, master);
+      sweep(t, 140, 30, 0.6, 'sine', 0.6 * v);
+      sweep(t, 90, 25, 0.5, 'square', 0.08 * v);
+    },
     splat: (t, v) => {
       noise(t, 0.18, 0.18 * v, 500, master);
       sweep(t, 220, 70, 0.22, 'sine', 0.3 * v);

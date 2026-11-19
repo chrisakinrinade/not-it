@@ -28,6 +28,13 @@
   let clockOffset = null;
   let toastTimer = null;
   let lastMusicPhase = null;
+  // Spectating (knocked out, or waiting for the next round): follow IT until you pan the view yourself
+  let spectating = false;
+  let freeCam = false;
+  const panKeys = { left: false, right: false, up: false, down: false };
+  const booms = []; // hot potato explosions: { x, y, at }
+  let shakeUntil = 0;
+  let goUntil = 0;
 
   const savedName = () => {
     try { return localStorage.getItem('tagName') || ''; } catch { return ''; }
@@ -77,7 +84,10 @@
         if (wantJoin) send({ t: 'join', name: savedName() });
         break;
       case 'room':
-        if (m.phase === 'ready' && room.phase !== 'ready') cam.ready = false; // players respawned: snap camera
+        if (m.phase === 'ready' && room.phase !== 'ready') {
+          cam.ready = false; // players respawned: snap camera
+          freeCam = false;
+        }
         room = m;
         joined = room.players.some((p) => p.id === myId);
         if (room.phase === 'lobby') snaps.length = 0;
@@ -92,7 +102,11 @@
         break;
       }
       case 'tag':
-        showToast(m.to === myId ? "You're IT! 🏃" : `${nameOf(m.from)} tagged ${nameOf(m.to)}!`);
+        if (room.mode === 'potato') {
+          showToast(m.to === myId ? "You've got the potato! 🥔" : `${nameOf(m.from)} passed the potato to ${nameOf(m.to)}!`);
+        } else {
+          showToast(m.to === myId ? "You're IT! 🏃" : `${nameOf(m.from)} tagged ${nameOf(m.to)}!`);
+        }
         if (m.to === myId) Music.sfx('tagged');
         else if (m.from === myId) Music.sfx('tag');
         else Music.sfx('tag', 0.5);
@@ -105,6 +119,15 @@
           showToast(m.id === myId ? 'Speed boots! 👟' : `${nameOf(m.id)} grabbed speed boots! 👟`);
           if (m.id === myId) Music.sfx('powerup');
         }
+        break;
+      case 'boom':
+        booms.push({ x: m.x, y: m.y, at: performance.now() });
+        shakeUntil = performance.now() + 350;
+        Music.sfx('boom');
+        if (m.id === myId) showToast("💥 You're out!");
+        else if (m.next === myId) showToast(`💥 ${nameOf(m.id)} is out — you've got the potato!`);
+        else if (m.next) showToast(`💥 ${nameOf(m.id)} is out! ${nameOf(m.next)} has the potato`);
+        else showToast(`💥 ${nameOf(m.id)} is out!`);
         break;
       case 'notice':
         showToast(m.msg);
@@ -203,7 +226,15 @@
     }
     list.hidden = room.players.length === 0;
 
+    const potato = room.mode === 'potato';
+    $('#lobbySub').innerHTML = potato
+      ? "Don't be holding the <strong>potato</strong> when it blows. Last one standing wins!"
+      : 'Whoever is <strong>IT</strong> when the clock runs out loses.';
+    renderModeOptions();
     renderRoundOptions();
+    renderFuse();
+    $('.round-length').hidden = potato;
+    $('.fuse-length').hidden = !potato;
     renderMapOptions();
 
     const count = room.players.length;
@@ -225,37 +256,55 @@
     else status = `${count}/${maxPlayers} players — anyone can start the game.`;
     $('#lobbyStatus').textContent = status;
 
-    // In-game banner for players waiting for the next round
+    // In-game banner for players watching: waiting for the next round, or knocked out
     const me = playerInfo(myId);
-    const waiting = me?.waiting && room.phase !== 'ended';
-    $('#banner').hidden = !waiting;
-    $('#banner').textContent = "You're in! Watching this round — you'll play the next one.";
+    const ended = room.phase === 'ended';
+    const watching = inGame && !ended && (me?.waiting || me?.out);
+    const lookHint = isTouch ? 'drag to look around' : 'arrow keys to look around';
+    $('#banner').hidden = !watching;
+    $('#bannerText').textContent = me?.out ? `💥 You're out — ${lookHint}` : `Watching — you'll play next round · ${lookHint}`;
+    $('#followBtn').textContent = potato ? 'Follow 🥔' : 'Follow IT';
 
     // End-of-round overlay
-    const ended = room.phase === 'ended';
     $('#endOverlay').hidden = !ended;
     if (ended) {
-      const loser = playerInfo(room.loserId);
-      if (room.loserId === myId) {
-        $('#endTitle').textContent = 'You were IT — you lose! 😵';
-        $('#endSub').textContent = 'Better luck next round.';
+      let featured; // whose face goes on the card
+      if (potato) {
+        featured = playerInfo(room.winnerId);
+        const myPlace = room.results?.find((r) => r.id === myId)?.place;
+        if (room.winnerId === myId) {
+          $('#endTitle').textContent = 'You win! 🥔🎉';
+          $('#endSub').textContent = 'Last one standing.';
+        } else if (room.winnerId) {
+          $('#endTitle').textContent = `${room.winnerName} wins! 🥔`;
+          $('#endSub').textContent = myPlace ? `Last one standing. You came ${ordinal(myPlace)}.` : 'Last one standing.';
+        } else {
+          $('#endTitle').textContent = 'Nobody wins! 💥';
+          $('#endSub').textContent = '';
+        }
       } else {
-        $('#endTitle').textContent = `${room.loserName ?? 'Someone'} was IT — they lose!`;
-        $('#endSub').textContent = me && !me.waiting ? 'You win! 🎉' : 'Everyone else wins.';
+        featured = playerInfo(room.loserId);
+        if (room.loserId === myId) {
+          $('#endTitle').textContent = 'You were IT — you lose! 😵';
+          $('#endSub').textContent = 'Better luck next round.';
+        } else {
+          $('#endTitle').textContent = `${room.loserName ?? 'Someone'} was IT — they lose!`;
+          $('#endSub').textContent = me && !me.waiting ? 'You win! 🎉' : 'Everyone else wins.';
+        }
       }
       const icon = $('#loserIcon');
-      icon.hidden = !loser;
-      if (loser) {
+      icon.hidden = !featured;
+      if (featured) {
         const dpr = window.devicePixelRatio || 1;
         icon.width = 96 * dpr;
         icon.height = 96 * dpr;
-        paintIcon(icon, loser.char, 96);
+        paintIcon(icon, featured.char, 96);
       }
       $('#restartBtn').disabled = count < 2;
     }
     renderResults();
 
-    $('#touch').hidden = !(isTouch && inGame && !ended);
+    $('#touch').hidden = !(isTouch && inGame && !ended && !watching);
     if (!inGame || ended) clearInputs();
 
     updateMusic(inGame);
@@ -267,7 +316,8 @@
     lastMusicPhase = musicPhase;
     if (musicPhase === 'ended') {
       const me = playerInfo(myId);
-      Music.jingle(!!me && !me.waiting && room.loserId !== myId);
+      const won = room.mode === 'potato' ? room.winnerId === myId : !!me && !me.waiting && room.loserId !== myId;
+      Music.jingle(won);
     } else {
       Music.play(musicPhase);
     }
@@ -297,7 +347,9 @@
 
   const formatRound = (secs) => (secs < 60 ? `${secs}s` : `${secs / 60} min`.replace('1.5 min', '1½ min'));
 
-  // End-of-round scoreboard: time spent as IT, tags made, session wins
+  const ordinal = (n) => n + (n % 10 === 1 && n !== 11 ? 'st' : n % 10 === 2 && n !== 12 ? 'nd' : n % 10 === 3 && n !== 13 ? 'rd' : 'th');
+
+  // End-of-round scoreboard: time spent as IT (classic) or finishing place (hot potato), tags made, session wins
   function renderResults() {
     const box = $('#results');
     const rows = room.phase === 'ended' ? room.results || [] : [];
@@ -306,7 +358,8 @@
     if (!rows.length) return;
     const table = document.createElement('table');
     const head = table.insertRow();
-    for (const label of ['', 'Player', 'Time as IT', 'Tags', '🏆']) {
+    const potato = room.mode === 'potato';
+    for (const label of ['', 'Player', potato ? 'Place' : 'Time as IT', potato ? 'Passes' : 'Tags', '🏆']) {
       const th = document.createElement('th');
       th.textContent = label;
       head.append(th);
@@ -314,15 +367,67 @@
     for (const r of rows) {
       const tr = table.insertRow();
       if (r.id === room.loserId) tr.className = 'loser';
+      if (potato && r.place === 1) tr.className = 'winner';
       if (r.id === myId) tr.classList.add('me');
       tr.insertCell().append(iconCanvas(r.char, 28));
       tr.insertCell().textContent = r.id === myId ? `${r.name} (you)` : r.name;
-      tr.insertCell().textContent = `${r.itTime.toFixed(1)}s`;
+      tr.insertCell().textContent = potato ? ordinal(r.place) : `${r.itTime.toFixed(1)}s`;
       tr.insertCell().textContent = r.tags;
       tr.insertCell().textContent = playerInfo(r.id)?.wins ?? '–';
     }
     box.append(table);
   }
+
+  const MODES = [['classic', 'Classic tag'], ['potato', 'Hot potato 🥔']];
+
+  function renderModeOptions() {
+    const box = $('#modeOptions');
+    const canEdit = joined && room.phase === 'lobby';
+    box.replaceChildren();
+    for (const [id, label] of MODES) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.setAttribute('role', 'radio');
+      btn.setAttribute('aria-checked', String(id === (room.mode || 'classic')));
+      btn.textContent = label;
+      btn.disabled = !canEdit;
+      btn.addEventListener('click', () => send({ t: 'mode', mode: id }));
+      box.append(btn);
+    }
+    $('#modeLabel').textContent = canEdit ? 'Game mode' : 'Game mode (join to change)';
+  }
+
+  // The fuse stepper is static markup (rebuilding it would break press-and-hold)
+  function renderFuse() {
+    const canEdit = joined && room.phase === 'lobby';
+    const [lo, hi] = room.fuseRange || [5, 30];
+    const secs = room.fuseSeconds ?? 15;
+    $('#fuseValue').textContent = secs;
+    $('#fuseUp').disabled = !canEdit || secs >= hi;
+    $('#fuseDown').disabled = !canEdit || secs <= lo;
+    $('#fuseLabel').textContent = canEdit ? 'Fuse length' : 'Fuse length (join to change)';
+  }
+
+  // Press and hold + or − to keep stepping
+  let fuseRepeat = null;
+  const stopFuseRepeat = () => {
+    clearTimeout(fuseRepeat);
+    fuseRepeat = null;
+  };
+  for (const [sel, delta] of [['#fuseUp', 1], ['#fuseDown', -1]]) {
+    const btn = $(sel);
+    const step = () => send({ t: 'fuse', delta });
+    btn.addEventListener('pointerdown', (e) => {
+      if (btn.disabled) return;
+      e.preventDefault();
+      step();
+      stopFuseRepeat();
+      const again = (ms) => { fuseRepeat = setTimeout(() => { step(); again(90); }, ms); };
+      again(400);
+    });
+    btn.addEventListener('click', (e) => { if (e.detail === 0) step(); }); // keyboard activation
+  }
+  for (const ev of ['pointerup', 'pointercancel', 'blur']) addEventListener(ev, stopFuseRepeat);
 
   function renderRoundOptions() {
     const box = $('#roundOptions');
@@ -425,6 +530,7 @@
 
   function clearInputs() {
     keys.left = keys.right = keys.jump = keys.dash = false;
+    panKeys.left = panKeys.right = panKeys.up = panKeys.down = false;
     touch.left = touch.right = touch.jump = touch.dash = false;
     document.querySelectorAll('.tbtn.active').forEach((b) => b.classList.remove('active'));
     pushInput();
@@ -437,8 +543,18 @@
     ShiftLeft: 'dash', ShiftRight: 'dash', ArrowDown: 'dash', KeyS: 'dash',
   };
 
+  const PAN_MAP = {
+    ArrowLeft: 'left', KeyA: 'left', ArrowRight: 'right', KeyD: 'right',
+    ArrowUp: 'up', KeyW: 'up', ArrowDown: 'down', KeyS: 'down',
+  };
+
   function onKey(e, down) {
     if (e.target instanceof HTMLInputElement) return;
+    const pan = PAN_MAP[e.code];
+    if (pan && !$('#game').hidden) {
+      panKeys[pan] = down;
+      if (down && spectating) freeCam = true;
+    }
     const k = KEY_MAP[e.code];
     if (!k || $('#game').hidden) return;
     e.preventDefault();
@@ -469,6 +585,26 @@
       pad.addEventListener(ev, onTouch, { passive: false });
     }
   }
+  // Spectators drag the view around (touch or mouse)
+  let drag = null;
+  canvas.addEventListener('pointerdown', (e) => {
+    if (!spectating) return;
+    drag = { x: e.clientX, y: e.clientY };
+    canvas.setPointerCapture(e.pointerId);
+  });
+  canvas.addEventListener('pointermove', (e) => {
+    if (!drag || !spectating) return;
+    cam.x -= (e.clientX - drag.x) / viewScale;
+    cam.y -= (e.clientY - drag.y) / viewScale;
+    drag = { x: e.clientX, y: e.clientY };
+    freeCam = true;
+  });
+  for (const ev of ['pointerup', 'pointercancel']) canvas.addEventListener(ev, () => { drag = null; });
+  $('#followBtn').addEventListener('click', (e) => {
+    e.currentTarget.blur();
+    freeCam = false;
+  });
+
   // Block pinch-zoom / double-tap-zoom gestures on iOS during play
   document.addEventListener('gesturestart', (e) => e.preventDefault());
   $('#game').addEventListener('touchmove', (e) => e.preventDefault(), { passive: false });
@@ -530,15 +666,25 @@
   const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 
   function cameraTargetId(state) {
+    if (spectating && freeCam) return null;
     return state.players.some((p) => p.id === myId) ? myId : state.itId;
   }
 
   function updateCamera(state, dt) {
+    const world = worldOf(currentMap());
+    const maxX = Math.max(0, world.width - view.width);
+    const maxY = Math.max(0, world.height - view.height);
+    if (spectating && freeCam) {
+      const step = 700 * dt;
+      cam.x = clamp(cam.x + (panKeys.right - panKeys.left) * step, 0, maxX);
+      cam.y = clamp(cam.y + (panKeys.down - panKeys.up) * step, 0, maxY);
+      cam.ready = true;
+      return;
+    }
     const target = state.players.find((p) => p.id === cameraTargetId(state));
     if (!target) return;
-    const world = worldOf(currentMap());
-    const tx = clamp(target.x + pSize.w / 2 - view.width / 2, 0, Math.max(0, world.width - view.width));
-    const ty = clamp(target.y + pSize.h / 2 - view.height * 0.55, 0, Math.max(0, world.height - view.height));
+    const tx = clamp(target.x + pSize.w / 2 - view.width / 2, 0, maxX);
+    const ty = clamp(target.y + pSize.h / 2 - view.height * 0.55, 0, maxY);
     if (!cam.ready) {
       cam.x = tx;
       cam.y = ty;
@@ -672,6 +818,10 @@
         }
         continue;
       }
+      if (isIt && room.mode === 'potato') {
+        const left = fuseLeft(state);
+        drawPotato(ctx, cx + p.f * 21, p.y + (p.dm === 1 ? 30 : 22), 1, left / room.fuseSeconds, time, left < 3 && !state.ho);
+      }
       const topY = p.dm === 1 ? p.y + pSize.h * 0.4 : p.y; // labels drop with a slide
 
       const label = isMe ? `${info.name} (you)` : info.name;
@@ -700,6 +850,41 @@
     }
   }
 
+  // Hot potato: seconds left on the fuse (it sits full during a hand-off)
+  function fuseLeft(state) {
+    return Math.min(room.fuseSeconds ?? 15, state.timeLeft);
+  }
+
+  // Hot potato explosion: flash, shockwave ring, debris and smoke
+  function drawBooms(now) {
+    while (booms.length && now - booms[0].at > 900) booms.shift();
+    for (const b of booms) {
+      const k = (now - b.at) / 900;
+      if (k < 0.25) {
+        ctx.fillStyle = `rgba(255, 244, 200, ${1 - k / 0.25})`;
+        fillEllipse(ctx, b.x, b.y, 40 + k * 120, 40 + k * 120);
+      }
+      ctx.strokeStyle = `rgba(255, 146, 43, ${1 - k})`;
+      ctx.lineWidth = 6 * (1 - k) + 1;
+      ctx.beginPath();
+      ctx.arc(b.x, b.y, 20 + k * 110, 0, Math.PI * 2);
+      ctx.stroke();
+      for (let i = 0; i < 12; i++) {
+        const a = (i / 12) * Math.PI * 2 + i * 0.3;
+        const r = 10 + k * (70 + (i % 3) * 25);
+        const x = b.x + Math.cos(a) * r;
+        const y = b.y + Math.sin(a) * r + k * k * 60;
+        ctx.fillStyle = i % 2 ? `rgba(255, 212, 59, ${1 - k})` : `rgba(201, 139, 75, ${1 - k})`;
+        fillEllipse(ctx, x, y, 4 * (1 - k) + 1.5, 4 * (1 - k) + 1.5);
+      }
+      ctx.fillStyle = `rgba(90, 90, 100, ${0.45 * (1 - k)})`;
+      for (let i = 0; i < 5; i++) {
+        const a = -Math.PI / 2 + (i - 2) * 0.5;
+        fillEllipse(ctx, b.x + Math.cos(a) * k * 50, b.y + Math.sin(a) * k * 60, 12 + k * 18, 12 + k * 18);
+      }
+    }
+  }
+
   // Slowed by a trap: goo clinging to the feet and dripping off
   function drawStuckFeet(g, colors, p, cx, feetY, time) {
     if (!colors) return;
@@ -715,7 +900,7 @@
   }
 
   // ---- Sound effects driven by game state ----
-  const heard = { sp: 0, iv: 0, sl: 0, tc: null, dc: null, jc: null, g: null, count: null, tick: null, phase: null };
+  const heard = { ho: null, fuseTick: 0, sp: 0, iv: 0, sl: 0, tc: null, dc: null, jc: null, g: null, count: null, tick: null, phase: null };
 
   function detectSounds(state) {
     const me = state.players.find((p) => p.id === myId);
@@ -744,10 +929,27 @@
       heard.count = n;
     } else if (state.phase === 'playing' && heard.phase === 'ready') {
       Music.sfx('go');
+      goUntil = performance.now() + 800;
     }
 
-    // Clock ticks for the final 5 seconds (louder on the last one)
-    if (state.phase === 'playing' && state.timeLeft <= 5) {
+    if (room.mode === 'potato') {
+      // Hand-off countdown beeps, then a fuse that ticks faster as it burns down
+      if (state.ho > 0) {
+        const n = Math.ceil(state.ho);
+        if (n !== heard.ho) Music.sfx('beep');
+        heard.ho = n;
+      } else {
+        if (heard.ho !== null && state.phase === 'playing') goUntil = performance.now() + 800;
+        heard.ho = null;
+        const now = performance.now() / 1000;
+        if (state.phase === 'playing' && now >= heard.fuseTick) {
+          const left = fuseLeft(state);
+          Music.sfx('tick', left < 3 ? 1.6 : 1);
+          heard.fuseTick = now + clamp(0.1 + left * 0.04, 0.1, 0.7);
+        }
+      }
+    } else if (state.phase === 'playing' && state.timeLeft <= 5) {
+      // Clock ticks for the final 5 seconds (louder on the last one)
       const secs = Math.ceil(state.timeLeft);
       if (secs !== heard.tick && secs >= 1) Music.sfx('tick', secs === 1 ? 1.8 : 1);
       heard.tick = secs;
@@ -902,6 +1104,7 @@
 
   function drawHud(state, time) {
     const cx = view.width / 2;
+    const potato = room.mode === 'potato';
 
     if (state.phase === 'ready') {
       ctx.fillStyle = 'rgba(15, 20, 36, 0.35)';
@@ -909,14 +1112,22 @@
       const n = Math.max(1, Math.ceil(state.timeLeft));
       drawLabel(String(n), cx, 250, '#ffffff', 96);
       const itName = state.itId === myId ? 'You are' : `${nameOf(state.itId)} is`;
-      drawLabel(`${itName} IT — get ready!`, cx, 300, '#ffe066', 26);
+      const role = potato ? 'holding the potato' : 'IT';
+      drawLabel(`${itName} ${role} — get ready!`, cx, 300, '#ffe066', 26);
       return;
     }
 
-    // Timer pill
-    const secs = Math.ceil(state.timeLeft);
-    const label = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`;
-    const urgent = state.phase === 'playing' && secs <= 10;
+    // Hot potato hand-off: the game keeps going while the new holder counts down
+    if (potato && state.phase === 'playing' && state.ho > 0) {
+      drawLabel(String(Math.ceil(state.ho)), cx, 250, '#ffffff', 80);
+      const who = state.itId === myId ? "You've" : `${nameOf(state.itId)} has`;
+      drawLabel(`${who} got the potato — scatter!`, cx, 295, '#ffe066', 24);
+    }
+
+    // Timer pill (hot potato: the fuse)
+    const secs = Math.ceil(potato ? fuseLeft(state) : state.timeLeft);
+    const label = potato ? `${secs}s` : `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`;
+    const urgent = state.phase === 'playing' && (potato ? secs <= 3 && !state.ho : secs <= 10);
     const pulse = urgent ? 1 + Math.max(0, Math.sin(time * 10)) * 0.08 : 1;
     ctx.save();
     ctx.translate(cx, 32);
@@ -928,13 +1139,27 @@
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillStyle = '#fff';
-    ctx.fillText(label, 0, 2);
+    if (potato) {
+      drawPotato(ctx, -28, 3, 0.9, fuseLeft(state) / room.fuseSeconds, time, false);
+      ctx.fillText(label, 14, 2);
+    } else {
+      ctx.fillText(label, 0, 2);
+    }
     ctx.restore();
     ctx.textBaseline = 'alphabetic';
+    if (potato) {
+      ctx.font = '800 15px ui-rounded, system-ui, sans-serif';
+      ctx.textAlign = 'left';
+      ctx.fillStyle = 'rgba(20, 26, 44, 0.8)';
+      roundRectPath(ctx, cx + 60, 18, 74, 28, 14);
+      ctx.fill();
+      ctx.fillStyle = '#fff';
+      ctx.fillText(`${state.players.length} left`, cx + 72, 37);
+    }
 
     // Who's IT
     const it = playerInfo(state.itId);
-    if (it) {
+    if (it && !it.out) {
       ctx.fillStyle = 'rgba(20, 26, 44, 0.8)';
       roundRectPath(ctx, 12, 12, 170, 40, 20);
       ctx.fill();
@@ -947,7 +1172,7 @@
       ctx.textAlign = 'left';
       ctx.fillStyle = '#fff';
       const who = state.itId === myId ? 'YOU' : it.name;
-      ctx.fillText(`IT: ${who}`, 50, 38, 124);
+      ctx.fillText(`${potato ? '🥔' : 'IT:'} ${who}`, 50, 38, 124);
     }
 
     // Your power-up countdowns (speed boots, invisibility)
@@ -967,7 +1192,7 @@
       });
     }
 
-    if (state.phase === 'playing' && room.roundSeconds - state.timeLeft < 0.8) {
+    if (performance.now() < goUntil) {
       drawLabel('GO!', cx, 280, '#ffe066', 90);
     }
   }
@@ -982,6 +1207,9 @@
     const time = now / 1000;
     resizeCanvas();
     const state = interpolatedState();
+    spectating = !!state && joined && room.phase !== 'ended' && !state.players.some((p) => p.id === myId);
+    if (!spectating) freeCam = false;
+    $('#followBtn').hidden = !(spectating && freeCam);
     if (state) {
       detectTeleports(state);
       detectSounds(state);
@@ -995,7 +1223,8 @@
     const theme = themeFor(map);
     drawSkyLayer(ctx, theme, view.width, view.height, cam.x, cam.y, time);
     ctx.save();
-    ctx.translate(-cam.x, -cam.y);
+    const shake = Math.max(0, (shakeUntil - now) / 350) * 6;
+    ctx.translate(-cam.x + (Math.random() - 0.5) * shake, -cam.y + (Math.random() - 0.5) * shake);
     drawScenery(ctx, theme, map.platforms);
     drawRails(ctx, map.platforms);
     drawPlatformsThemed(ctx, theme, livePlatforms(map, state));
@@ -1004,10 +1233,12 @@
     if (state?.pu) drawPowerupPickup(ctx, state.pu, time);
     drawPortalsThemed(ctx, map.portals, time, Math.max(0, (portalFlashUntil - now) / 400));
     if (state) drawPlayers(state, time);
+    drawBooms(now);
     ctx.restore();
 
     if (state) {
-      Music.setUrgent(state.phase === 'playing' && state.timeLeft <= 10);
+      const urgent = room.mode === 'potato' ? !state.ho && fuseLeft(state) <= 5 : state.timeLeft <= 10;
+      Music.setUrgent(state.phase === 'playing' && urgent);
       drawOffscreenArrows(state, time);
       updateDashMeter(state);
       drawHud(state, time);

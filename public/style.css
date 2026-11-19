@@ -133,6 +133,9 @@ body.touch .touch-hint { display: inline; }
 #canvas { display: block; }
 
 #banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   position: absolute;
   top: calc(env(safe-area-inset-top) + 56px);
   left: 50%;
@@ -379,3 +382,55 @@ body.touch .touch-hint { display: inline; }
 }
 .tbtn.dash.ready { border-color: #ffe066; color: #ffe066; }
 .tbtn.dash.active { background: rgba(255, 255, 255, 0.4); }
+
+/* Game mode picker */
+.mode-picker { margin-top: 16px; }
+
+/* Hot potato fuse length: a tall +/- stepper */
+.fuse-length { margin-top: 16px; display: flex; flex-direction: column; align-items: center; }
+.stepper {
+  display: flex;
+  flex-direction: column;
+  width: 84px;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid #b8bec8;
+  box-shadow: 0 2px 6px rgba(31, 42, 68, 0.2);
+}
+.stepper button {
+  height: 44px;
+  padding: 0;
+  border-radius: 0;
+  font-size: 32px;
+  line-height: 1;
+  color: #6b7280;
+  background: linear-gradient(#fbfbfc, #d9dde3);
+  box-shadow: none;
+  touch-action: manipulation;
+}
+.stepper button:active:not(:disabled) { transform: none; box-shadow: none; background: linear-gradient(#d9dde3, #eef0f3); }
+.stepper button:disabled { opacity: 1; color: #c3c8d0; }
+#fuseUp { border-bottom: 1px solid #b8bec8; }
+#fuseDown { border-top: 1px solid #b8bec8; }
+#fuseValue {
+  display: block;
+  height: 56px;
+  line-height: 56px;
+  font-size: 36px;
+  font-weight: 600;
+  color: var(--text);
+  background: linear-gradient(#ffffff, #f1f3f6);
+  font-variant-numeric: tabular-nums;
+}
+.stepper-unit { margin-top: 4px; font-size: 0.75rem; font-weight: 700; color: var(--muted); }
+
+/* Spectating banner + follow button */
+#followBtn {
+  flex: none;
+  padding: 4px 10px;
+  font-size: 0.8rem;
+  border-radius: 999px;
+  box-shadow: none;
+}
+#followBtn:active:not(:disabled) { transform: scale(0.95); box-shadow: none; }
+#results tr.winner td { background: #fff9db; color: #a26a00; }

@@ -451,6 +451,50 @@ function drawTraps(g, theme, traps, time, splashAt = []) {
   });
 }
 
+/**
+ * The hot potato, centred on (x, y) and scaled by s. `fuse` (0–1) is how much
+ * wick is left; `danger` flashes it red when it's about to blow.
+ */
+function drawPotato(g, x, y, s = 1, fuse = 1, time = 0, danger = false) {
+  g.save();
+  g.translate(x, y);
+  g.scale(s, s);
+  const flash = danger && Math.floor(time * 8) % 2;
+  g.fillStyle = flash ? '#ff6b6b' : '#c98b4b';
+  g.beginPath();
+  g.ellipse(0, 0, 11, 8.5, -0.3, 0, Math.PI * 2);
+  g.fill();
+  g.fillStyle = flash ? '#e03131' : '#9c6230'; // eyes of the potato
+  fillEllipse(g, -4, 1.5, 1.6, 1.2);
+  fillEllipse(g, 3, -2, 1.3, 1);
+  fillEllipse(g, 5.5, 3, 1.2, 1);
+  g.fillStyle = 'rgba(255, 255, 255, 0.35)';
+  fillEllipse(g, -4, -4, 3.5, 1.6);
+  // A wiggly wick out of the top that burns down
+  const len = 3 + 14 * Math.max(0, Math.min(1, fuse));
+  let tipX = 3;
+  let tipY = -7;
+  g.strokeStyle = '#495057';
+  g.lineWidth = 2;
+  g.lineCap = 'round';
+  g.beginPath();
+  g.moveTo(tipX, tipY);
+  for (let k = 1; k <= 10; k++) {
+    const u = (k / 10) * len;
+    tipX = 3 + Math.sin(u * 0.4) * 3;
+    tipY = -7 - u;
+    g.lineTo(tipX, tipY);
+  }
+  g.stroke();
+  // Spark
+  const flicker = 3 + Math.sin(time * 40) * 1.2;
+  g.fillStyle = 'rgba(255, 146, 43, 0.6)';
+  fillEllipse(g, tipX, tipY, flicker + 2, flicker + 2);
+  g.fillStyle = '#ffe066';
+  drawStar(g, tipX, tipY, flicker);
+  g.restore();
+}
+
 /** A small winged boot centred on (x, y), scaled by s. */
 function drawBoot(g, x, y, s = 1) {
   g.save();

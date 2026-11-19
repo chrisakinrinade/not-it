@@ -239,6 +239,14 @@ const ROUND_OPTIONS = [30, 60, 90, 120, 180]; // choices offered in the lobby
 let roundSeconds = Number(process.env.ROUND_SECONDS) || 60;
 const READY_SECONDS = 3;
 const FREEZE_SECONDS = 1; // newly-tagged player can't move
+// Game modes: classic tag (IT when the clock runs out loses) or hot potato
+// (holding the potato when its fuse runs out knocks you out; last one standing wins).
+const MODES = ['classic', 'potato'];
+let mode = 'classic';
+const FUSE_MIN = 5;
+const FUSE_MAX = 30;
+let fuseSeconds = 15; // set in the lobby; the fuse resets to this on every tag
+const HANDOFF_SECONDS = 3; // after a boom, the new holder is frozen this long so everyone can scatter
 const IMMUNE_SECONDS = 2; // tagger can't be tagged straight back
 
 // Dash button: one button, two moves. On the ground it's a slide (fast, low
@@ -321,7 +329,11 @@ let phase = 'lobby'; // lobby | ready | playing | ended
 let itId = null;
 let loserId = null;
 let loserName = null;
-let phaseEndsAt = 0;
+let winnerId = null; // hot potato: last one standing
+let winnerName = null;
+let phaseEndsAt = 0; // end of the round (classic) or when the potato blows (hot potato)
+let handoffUntil = 0; // hot potato: new holder frozen after a boom
+let outCount = 0; // hot potato: how many have been knocked out this round
 
 const nowSec = () => performance.now() / 1000;
 const NO_INPUT = { left: false, right: false, jump: false, dash: false };
@@ -336,7 +348,7 @@ function broadcast(msg) {
 }
 
 function activePlayers() {
-  return [...players.values()].filter((p) => !p.waiting);
+  return [...players.values()].filter((p) => !p.waiting && !p.out);
 }
 
 function roomMessage() {
@@ -344,16 +356,22 @@ function roomMessage() {
     t: 'room',
     phase,
     roundSeconds,
+    mode,
+    fuseSeconds,
+    fuseRange: [FUSE_MIN, FUSE_MAX],
     mapId,
     itId,
     loserId,
     loserName,
+    winnerId,
+    winnerName,
     results: phase === 'ended' ? lastResults : null,
     players: [...players.values()].map((p) => ({
       id: p.id,
       name: p.name,
       char: p.char,
       waiting: p.waiting,
+      out: !!p.out, // knocked out of this hot potato round
       wins: wins.get(p.name) ?? 0,
     })),
   };
@@ -371,6 +389,7 @@ function snapshot() {
     phase,
     timeLeft: phase === 'ended' ? 0 : Math.max(0, phaseEndsAt - t),
     itId,
+    ho: Math.max(0, Math.round((handoffUntil - t) * 10) / 10), // hot potato hand-off countdown (s)
     // [index, x, y] for each moving platform
     pu: powerup, // { x, y, kind } or null
     mp: livePlatforms.flatMap((pl, i) => (pl.move ? [[i, Math.round(pl.x * 10) / 10, Math.round(pl.y * 10) / 10]] : [])),
@@ -525,6 +544,8 @@ function startRound() {
   const spawns = shuffle(currentMap().spawns.slice());
   list.forEach((p, i) => {
     p.waiting = false;
+    p.out = false;
+    p.outOrder = 0;
     p.itTime = 0;
     p.tags = 0;
     resetBody(p, spawns[i]);
@@ -532,6 +553,10 @@ function startRound() {
   itId = pickRandom(list).id;
   loserId = null;
   loserName = null;
+  winnerId = null;
+  winnerName = null;
+  handoffUntil = 0;
+  outCount = 0;
   phase = 'ready';
   phaseEndsAt = nowSec() + READY_SECONDS;
   powerup = null;
@@ -548,7 +573,65 @@ function toLobby() {
   itId = null;
   loserId = null;
   loserName = null;
-  for (const p of players.values()) p.waiting = false;
+  winnerId = null;
+  winnerName = null;
+  for (const p of players.values()) {
+    p.waiting = false;
+    p.out = false;
+  }
+  broadcastRoom();
+}
+
+// Classic: `loser` is whoever was IT. Hot potato: `winner` is the last one standing.
+function endRound({ loser = null, winner = null }) {
+  phase = 'ended';
+  const played = [...players.values()].filter((p) => !p.waiting);
+  if (mode === 'potato') {
+    winnerId = winner?.id ?? null;
+    winnerName = winner?.name ?? null;
+    if (winner) wins.set(winner.name, (wins.get(winner.name) ?? 0) + 1);
+    // 1st = last one standing, then in reverse order of being knocked out
+    lastResults = played
+      .sort((a, b) => (b === winner) - (a === winner) || b.outOrder - a.outOrder)
+      .map((p, i) => ({ id: p.id, name: p.name, char: p.char, place: i + 1, itTime: Math.round(p.itTime * 10) / 10, tags: p.tags }));
+  } else {
+    loserId = loser?.id ?? null;
+    loserName = loser?.name ?? null;
+    for (const p of played) if (p !== loser) wins.set(p.name, (wins.get(p.name) ?? 0) + 1);
+    lastResults = played
+      .map((p) => ({ id: p.id, name: p.name, char: p.char, itTime: Math.round(p.itTime * 10) / 10, tags: p.tags }))
+      .sort((a, b) => (a.id === loserId) - (b.id === loserId) || a.itTime - b.itTime);
+  }
+  broadcast(snapshot());
+  broadcastRoom();
+}
+
+// Hot potato: give the potato to `next`, frozen briefly so everyone else can scatter
+function handOff(next, t) {
+  itId = next.id;
+  next.frozenUntil = t + HANDOFF_SECONDS;
+  next.immuneUntil = 0;
+  handoffUntil = t + HANDOFF_SECONDS;
+  phaseEndsAt = handoffUntil + fuseSeconds;
+}
+
+// Hot potato: the fuse ran out. The holder is out and the nearest survivor gets the potato.
+function explodePotato(t) {
+  const holder = players.get(itId);
+  if (!holder) return;
+  holder.out = true;
+  holder.outOrder = ++outCount;
+  const survivors = activePlayers();
+  const hx = holder.x + PLAYER_W / 2;
+  const hy = holder.y + PLAYER_H / 2;
+  const dist = (p) => Math.hypot(p.x + PLAYER_W / 2 - hx, p.y + PLAYER_H / 2 - hy);
+  const next = survivors.length > 1 ? survivors.reduce((a, b) => (dist(b) < dist(a) ? b : a)) : null;
+  broadcast({ t: 'boom', id: holder.id, x: Math.round(hx), y: Math.round(hy), next: next?.id ?? null });
+  if (!next) {
+    endRound({ winner: survivors[0] ?? null });
+    return;
+  }
+  handOff(next, t);
   broadcastRoom();
 }
 
@@ -559,15 +642,25 @@ function removePlayer(id) {
   if (phase === 'ready' || phase === 'playing') {
     const active = activePlayers();
     if (active.length < 2) {
+      if (mode === 'potato' && active.length === 1 && outCount > 0) {
+        broadcast({ t: 'notice', msg: `${p.name} left — ${active[0].name} is the last one standing!` });
+        endRound({ winner: active[0] });
+        return;
+      }
       broadcast({ t: 'notice', msg: `${p.name} left — not enough players.` });
       toLobby();
       return;
     }
     if (id === itId) {
       const next = pickRandom(active);
-      itId = next.id;
-      next.frozenUntil = nowSec() + FREEZE_SECONDS;
-      broadcast({ t: 'notice', msg: `${p.name} left — ${next.name} is now IT!` });
+      if (mode === 'potato' && phase === 'playing') {
+        handOff(next, nowSec());
+        broadcast({ t: 'notice', msg: `${p.name} left — ${next.name} has the potato! 🥔` });
+      } else {
+        itId = next.id;
+        next.frozenUntil = nowSec() + FREEZE_SECONDS;
+        broadcast({ t: 'notice', msg: `${p.name} left — ${next.name} is now IT!` });
+      }
     }
   }
   broadcastRoom();
@@ -720,6 +813,7 @@ function checkTag(active, t) {
       p.frozenUntil = t + FREEZE_SECONDS;
       p.dashMode = null;
       p.vx = 0;
+      if (mode === 'potato') phaseEndsAt = p.frozenUntil + fuseSeconds; // passing the potato resets its fuse
       broadcast({ t: 'tag', from: it.id, to: p.id });
       return;
     }
@@ -731,7 +825,7 @@ function tick() {
   const t = nowSec();
   if (phase === 'ready' && t >= phaseEndsAt) {
     phase = 'playing';
-    phaseEndsAt = t + roundSeconds;
+    phaseEndsAt = t + (mode === 'potato' ? fuseSeconds : roundSeconds);
     broadcastRoom();
   }
   updatePlatforms(t);
@@ -743,15 +837,8 @@ function tick() {
     checkTag(active, t);
     updatePowerup(active, t);
     if (t >= phaseEndsAt) {
-      phase = 'ended';
-      loserId = itId;
-      loserName = players.get(itId)?.name ?? null;
-      for (const p of active) if (p.id !== loserId) wins.set(p.name, (wins.get(p.name) ?? 0) + 1);
-      lastResults = active
-        .map((p) => ({ id: p.id, name: p.name, char: p.char, itTime: Math.round(p.itTime * 10) / 10, tags: p.tags }))
-        .sort((a, b) => (a.id === loserId) - (b.id === loserId) || a.itTime - b.itTime);
-      broadcast(snapshot());
-      broadcastRoom();
+      if (mode === 'potato') explodePotato(t);
+      else endRound({ loser: players.get(itId) });
     }
   }
 }
@@ -809,6 +896,20 @@ function handleMessage(ws, msg) {
       const seconds = Number(msg.seconds);
       if (!players.has(ws.id) || phase !== 'lobby' || !ROUND_OPTIONS.includes(seconds)) return;
       roundSeconds = seconds;
+      broadcastRoom();
+      break;
+    }
+    case 'mode':
+      // Any joined player can pick the game mode while in the lobby
+      if (!players.has(ws.id) || phase !== 'lobby' || !MODES.includes(msg.mode)) return;
+      mode = msg.mode;
+      broadcastRoom();
+      break;
+    case 'fuse': {
+      // Hot potato fuse length: the lobby's +/- buttons send delta 1 or -1
+      if (!players.has(ws.id) || phase !== 'lobby') return;
+      const delta = Math.sign(Number(msg.delta) || 0);
+      fuseSeconds = Math.max(FUSE_MIN, Math.min(FUSE_MAX, fuseSeconds + delta));
       broadcastRoom();
       break;
     }
