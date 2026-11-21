@@ -830,6 +830,36 @@ function drawGhost(g, x, y, s = 1) {
   g.restore();
 }
 
+/** A feathered wing centred on (x, y), scaled by s — the wings (double jump) icon. */
+function drawWing(g, x, y, s = 1) {
+  g.save();
+  g.translate(x, y);
+  g.scale(s, s);
+  g.fillStyle = '#fff';
+  g.strokeStyle = '#4dabf7';
+  g.lineWidth = 1.5;
+  g.beginPath();
+  g.moveTo(-8, 6);
+  g.quadraticCurveTo(-10, -8, 6, -10);
+  g.quadraticCurveTo(10, -10, 10, -7);
+  g.quadraticCurveTo(9, -4, 4, -3);
+  g.quadraticCurveTo(8, -1, 6, 2);
+  g.quadraticCurveTo(3, 4, -1, 3);
+  g.quadraticCurveTo(1, 6, -2, 8);
+  g.quadraticCurveTo(-5, 9, -8, 6);
+  g.closePath();
+  g.fill();
+  g.stroke();
+  // Feather lines
+  g.beginPath();
+  g.moveTo(-6, 4);
+  g.lineTo(2, -6);
+  g.moveTo(-5, 6);
+  g.lineTo(1, 1);
+  g.stroke();
+  g.restore();
+}
+
 /** A small crest shield centred on (x, y), scaled by s. */
 function drawShield(g, x, y, s = 1) {
   g.save();
@@ -852,13 +882,14 @@ function drawShield(g, x, y, s = 1) {
   g.restore();
 }
 
-/** Floating power-up pickup: speed boots (gold), invisibility cloak (purple) or shield (teal). */
+/** Floating power-up pickup: speed boots (gold), invisibility cloak (purple), wings (sky blue) or shield (teal). */
 function drawPowerupPickup(g, pu, time) {
   const x = pu.x;
   const y = pu.y + Math.sin(time * 3) * 4;
   const cloak = pu.kind === 'cloak';
+  const wings = pu.kind === 'wings';
   const shield = pu.kind === 'shield';
-  const rgb = cloak ? '177, 151, 252' : shield ? '99, 230, 190' : '255, 224, 102';
+  const rgb = cloak ? '177, 151, 252' : wings ? '116, 192, 252' : shield ? '99, 230, 190' : '255, 224, 102';
   const glow = g.createRadialGradient(x, y, 4, x, y, 30);
   glow.addColorStop(0, `rgba(${rgb}, 0.8)`);
   glow.addColorStop(1, `rgba(${rgb}, 0)`);
@@ -872,6 +903,7 @@ function drawPowerupPickup(g, pu, time) {
   g.fill();
   g.stroke();
   if (cloak) drawGhost(g, x, y + Math.sin(time * 5) * 1.5, 1);
+  else if (wings) drawWing(g, x, y + Math.sin(time * 8) * 1.5, 1);
   else if (shield) drawShield(g, x, y, 1);
   else drawBoot(g, x + 2, y, 1);
   g.fillStyle = '#fff';

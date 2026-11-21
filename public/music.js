@@ -261,6 +261,10 @@ const Music = (() => {
       ['G6', 'E6', 'C6', 'G5'].forEach((n, i) => tone(t + i * 0.07, freq(n), 0.18, 'triangle', 0.12 * v, master));
       noise(t, 0.35, 0.04 * v, 5000, master);
     },
+    flap: (t, v) => {
+      sweep(t, 480, 960, 0.12, 'triangle', 0.12 * v);
+      noise(t, 0.12, 0.06 * v, 2500, master);
+    },
     shield: (t, v) => {
       ['E5', 'B5', 'E6'].forEach((n, i) => tone(t + i * 0.05, freq(n), 0.22, 'triangle', 0.13 * v, master));
       sweep(t, 600, 1800, 0.3, 'sine', 0.05 * v);
