@@ -3,6 +3,8 @@
 // Procedural chiptune music via Web Audio — no audio files needed.
 // Browsers (especially iOS Safari) only allow audio after a user gesture,
 // so the client calls Music.unlock() from tap/click/key handlers.
+// iOS also mutes Web Audio when the silent switch is on, unless the page is
+// marked as media playback: see setupPlaybackSession and playSilentLoop.
 const Music = (() => {
   const VOLUME = 0.5;
   const LOOKAHEAD = 0.12; // seconds of notes scheduled ahead of time
@@ -159,8 +161,53 @@ const Music = (() => {
     timer = setInterval(scheduler, 25);
   }
 
+  // ---- iOS silent switch ----
+  // Safari 16.4+ lets a page opt into the "playback" audio session, which
+  // ignores the ringer switch like a music app does.
+  function setupPlaybackSession() {
+    try {
+      if (navigator.audioSession) navigator.audioSession.type = 'playback';
+    } catch {}
+  }
+
+  // Older iOS: a playing <audio> element switches the page to the playback
+  // session, and Web Audio comes along with it. Loop a short silent WAV.
+  let silentEl = null;
+  function silentWavUrl() {
+    const rate = 8000, n = rate / 2; // 0.5s of 8-bit mono silence
+    const bytes = new Uint8Array(44 + n);
+    const v = new DataView(bytes.buffer);
+    const str = (o, t) => { for (let i = 0; i < t.length; i++) bytes[o + i] = t.charCodeAt(i); };
+    str(0, 'RIFF'); v.setUint32(4, 36 + n, true); str(8, 'WAVE');
+    str(12, 'fmt '); v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+    v.setUint32(24, rate, true); v.setUint32(28, rate, true); v.setUint16(32, 1, true); v.setUint16(34, 8, true);
+    str(36, 'data'); v.setUint32(40, n, true);
+    bytes.fill(128, 44);
+    let bin = '';
+    for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+    return 'data:audio/wav;base64,' + btoa(bin);
+  }
+  function playSilentLoop() {
+    if (navigator.audioSession || document.hidden) return;
+    if (!silentEl) {
+      silentEl = document.createElement('audio');
+      silentEl.src = silentWavUrl();
+      silentEl.loop = true;
+      silentEl.preload = 'auto';
+      silentEl.setAttribute('playsinline', '');
+      silentEl.setAttribute('x-webkit-airplay', 'deny');
+    }
+    if (silentEl.paused) {
+      const p = silentEl.play();
+      if (p && p.catch) p.catch(() => {});
+    }
+  }
+
   // ---- Public API ----
   function unlock() {
+    // Must run before the AudioContext starts so it picks up the session.
+    setupPlaybackSession();
+    playSilentLoop();
     if (!ctx) {
       const AC = window.AudioContext || window.webkitAudioContext;
       if (!AC) return;
@@ -307,9 +354,16 @@ const Music = (() => {
 
   document.addEventListener('visibilitychange', () => {
     if (!ctx) return;
-    if (document.hidden) ctx.suspend();
-    else ctx.resume();
+    if (document.hidden) {
+      ctx.suspend();
+      if (silentEl) silentEl.pause();
+    } else {
+      ctx.resume();
+      playSilentLoop();
+    }
   });
+
+  setupPlaybackSession();
 
   return { unlock, play, jingle, whoosh, sfx, setUrgent, toggleMute, isMuted: () => muted };
 })();
