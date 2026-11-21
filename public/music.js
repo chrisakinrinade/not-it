@@ -261,6 +261,15 @@ const Music = (() => {
       ['G6', 'E6', 'C6', 'G5'].forEach((n, i) => tone(t + i * 0.07, freq(n), 0.18, 'triangle', 0.12 * v, master));
       noise(t, 0.35, 0.04 * v, 5000, master);
     },
+    shield: (t, v) => {
+      ['E5', 'B5', 'E6'].forEach((n, i) => tone(t + i * 0.05, freq(n), 0.22, 'triangle', 0.13 * v, master));
+      sweep(t, 600, 1800, 0.3, 'sine', 0.05 * v);
+    },
+    shieldpop: (t, v) => {
+      sweep(t, 1400, 2600, 0.08, 'square', 0.06 * v);
+      noise(t + 0.03, 0.22, 0.14 * v, 4000, master);
+      tone(t + 0.05, freq('E6'), 0.2, 'triangle', 0.12 * v, master);
+    },
     powerdown: (t, v) => sweep(t, 900, 300, 0.25, 'triangle', 0.15 * v),
     boom: (t, v) => {
       noise(t, 0.7, 0.5 * v, 40, master);

@@ -830,12 +830,35 @@ function drawGhost(g, x, y, s = 1) {
   g.restore();
 }
 
-/** Floating power-up pickup: speed boots (gold) or invisibility cloak (purple). */
+/** A small crest shield centred on (x, y), scaled by s. */
+function drawShield(g, x, y, s = 1) {
+  g.save();
+  g.translate(x, y);
+  g.scale(s, s);
+  g.beginPath();
+  g.moveTo(0, -10);
+  g.quadraticCurveTo(5, -7, 9, -7);
+  g.quadraticCurveTo(9, 5, 0, 10);
+  g.quadraticCurveTo(-9, 5, -9, -7);
+  g.quadraticCurveTo(-5, -7, 0, -10);
+  g.closePath();
+  g.fillStyle = '#20c997';
+  g.fill();
+  g.strokeStyle = '#fff';
+  g.lineWidth = 2;
+  g.stroke();
+  g.fillStyle = 'rgba(255, 255, 255, 0.85)';
+  drawStar(g, 0, -0.5, 4);
+  g.restore();
+}
+
+/** Floating power-up pickup: speed boots (gold), invisibility cloak (purple) or shield (teal). */
 function drawPowerupPickup(g, pu, time) {
   const x = pu.x;
   const y = pu.y + Math.sin(time * 3) * 4;
   const cloak = pu.kind === 'cloak';
-  const rgb = cloak ? '177, 151, 252' : '255, 224, 102';
+  const shield = pu.kind === 'shield';
+  const rgb = cloak ? '177, 151, 252' : shield ? '99, 230, 190' : '255, 224, 102';
   const glow = g.createRadialGradient(x, y, 4, x, y, 30);
   glow.addColorStop(0, `rgba(${rgb}, 0.8)`);
   glow.addColorStop(1, `rgba(${rgb}, 0)`);
@@ -849,6 +872,7 @@ function drawPowerupPickup(g, pu, time) {
   g.fill();
   g.stroke();
   if (cloak) drawGhost(g, x, y + Math.sin(time * 5) * 1.5, 1);
+  else if (shield) drawShield(g, x, y, 1);
   else drawBoot(g, x + 2, y, 1);
   g.fillStyle = '#fff';
   for (let k = 0; k < 3; k++) {

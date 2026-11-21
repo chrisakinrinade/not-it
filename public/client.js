@@ -33,6 +33,7 @@
   let freeCam = false;
   const panKeys = { left: false, right: false, up: false, down: false };
   const booms = []; // hot potato explosions: { x, y, at }
+  const shieldPops = []; // shields that just blocked a tag: { x, y, at }
   let shakeUntil = 0;
   let goUntil = 0;
 
@@ -115,11 +116,25 @@
         if (m.kind === 'cloak') {
           showToast(m.id === myId ? "You're invisible! 👻" : `${nameOf(m.id)} vanished! 👻`);
           if (m.id === myId) Music.sfx('cloak');
+        } else if (m.kind === 'shield') {
+          showToast(m.id === myId ? 'Shield up! The next tag bounces off 🛡️' : `${nameOf(m.id)} grabbed a shield! 🛡️`);
+          if (m.id === myId) Music.sfx('shield');
         } else {
           showToast(m.id === myId ? 'Speed boots! 👟' : `${nameOf(m.id)} grabbed speed boots! 👟`);
           if (m.id === myId) Music.sfx('powerup');
         }
         break;
+      case 'block': {
+        // An invisible player's shield pops silently and unseen for everyone else
+        const involved = m.to === myId || m.from === myId;
+        if (m.hidden && !involved) break;
+        shieldPops.push({ x: m.x, y: m.y, at: performance.now() });
+        Music.sfx('shieldpop', involved ? 1 : 0.5);
+        if (m.to === myId) showToast(`🛡️ Your shield blocked ${nameOf(m.from)}'s tag!`);
+        else if (m.from === myId) showToast(`🛡️ ${nameOf(m.to)}'s shield blocked you!`);
+        else showToast(`🛡️ ${nameOf(m.to)}'s shield blocked ${nameOf(m.from)}!`);
+        break;
+      }
       case 'boom':
         booms.push({ x: m.x, y: m.y, at: performance.now() });
         shakeUntil = performance.now() + 350;
@@ -789,6 +804,7 @@
       } else {
         drawCharacter(ctx, info.char, p.x, p.y, pSize.w, pSize.h, opts);
       }
+      if (p.sh) drawShieldBubble(ctx, cx, p.y + pSize.h / 2, time);
       ctx.restore();
       if (isIt && room.mode === 'potato') {
         const left = fuseLeft(state);
@@ -825,6 +841,47 @@
   // Hot potato: seconds left on the fuse (it sits full during a hand-off)
   function fuseLeft(state) {
     return Math.min(room.fuseSeconds ?? 15, state.timeLeft);
+  }
+
+  // Shield: a shimmering bubble around the holder
+  function drawShieldBubble(g, cx, cy, time) {
+    const r = 34 + Math.sin(time * 4) * 1.5;
+    const fill = g.createRadialGradient(cx, cy, r * 0.55, cx, cy, r);
+    fill.addColorStop(0, 'rgba(99, 230, 190, 0)');
+    fill.addColorStop(1, 'rgba(99, 230, 190, 0.35)');
+    g.fillStyle = fill;
+    fillEllipse(g, cx, cy, r, r);
+    g.strokeStyle = 'rgba(150, 242, 215, 0.85)';
+    g.lineWidth = 2;
+    g.beginPath();
+    g.arc(cx, cy, r, 0, Math.PI * 2);
+    g.stroke();
+    // Glint sliding round the rim
+    g.strokeStyle = 'rgba(255, 255, 255, 0.9)';
+    g.lineWidth = 3;
+    g.lineCap = 'round';
+    g.beginPath();
+    g.arc(cx, cy, r - 4, time * 1.5, time * 1.5 + 0.6);
+    g.stroke();
+  }
+
+  // Shield pop: the bubble bursts into a ring and shards
+  function drawShieldPops(now) {
+    while (shieldPops.length && now - shieldPops[0].at > 600) shieldPops.shift();
+    for (const s of shieldPops) {
+      const k = (now - s.at) / 600;
+      ctx.strokeStyle = `rgba(150, 242, 215, ${1 - k})`;
+      ctx.lineWidth = 4 * (1 - k) + 1;
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, 34 + k * 40, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.fillStyle = `rgba(255, 255, 255, ${1 - k})`;
+      for (let i = 0; i < 10; i++) {
+        const a = (i / 10) * Math.PI * 2;
+        const r = 34 + k * (30 + (i % 2) * 20);
+        fillEllipse(ctx, s.x + Math.cos(a) * r, s.y + Math.sin(a) * r, 3 * (1 - k) + 1, 3 * (1 - k) + 1);
+      }
+    }
   }
 
   // Hot potato explosion: flash, shockwave ring, debris and smoke
@@ -1148,10 +1205,10 @@
       ctx.fillText(`${potato ? '🥔' : 'IT:'} ${who}`, 50, 38, 124);
     }
 
-    // Your power-up countdowns (speed boots, invisibility)
+    // Your power-ups (speed boots, invisibility, shield) and trap slow
     const me = state.players.find((p) => p.id === myId);
     if (me && state.phase === 'playing') {
-      const active = [[drawBoot, me.sp], [drawGhost, me.iv], [drawSnail, me.sl]].filter(([, secs]) => secs > 0);
+      const active = [[drawBoot, me.sp], [drawGhost, me.iv], [drawShield, me.sh ? Infinity : 0], [drawSnail, me.sl]].filter(([, secs]) => secs > 0);
       active.forEach(([icon, secs], i) => {
         const y = 58 + i * 36;
         ctx.fillStyle = 'rgba(20, 26, 44, 0.8)';
@@ -1161,7 +1218,7 @@
         ctx.font = '800 15px ui-rounded, system-ui, sans-serif';
         ctx.textAlign = 'left';
         ctx.fillStyle = secs <= 1.5 && Math.floor(time * 6) % 2 ? '#ff8787' : '#ffe066';
-        ctx.fillText(`${Math.ceil(secs)}s`, 54, y + 20);
+        ctx.fillText(secs === Infinity ? 'ON' : `${Math.ceil(secs)}s`, 54, y + 20); // the shield has no timer
       });
     }
 
@@ -1207,6 +1264,7 @@
     drawPortalsThemed(ctx, map.portals, time, Math.max(0, (portalFlashUntil - now) / 400));
     if (state) drawPlayers(state, time);
     drawBooms(now);
+    drawShieldPops(now);
     ctx.restore();
 
     if (state) {

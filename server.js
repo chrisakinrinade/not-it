@@ -414,10 +414,14 @@ const AIRDASH_SECONDS = 0.18;
 const AIRDASH_SPEED = 720;
 
 // Power-ups: one on the map at a time, at a random spot from the map's powerupSpots,
-// randomly either speed boots (run faster) or an invisibility cloak.
+// randomly either speed boots (run faster), an invisibility cloak or a shield.
 const BOOTS_SECONDS = 6;
 const CLOAK_SECONDS = 5; // invisibility cloak: others only see a faint shimmer
-const POWERUP_KINDS = ['boots', 'cloak'];
+const POWERUP_KINDS = ['boots', 'cloak', 'shield'];
+// Shield: no timer. It blocks the next tag that would hit you, then pops. The blocked
+// tagger can't touch you again for SHIELD_GRACE seconds, or they'd tag you next tick.
+const SHIELD_GRACE = 1;
+const SHIELD_BOUNCE = 420; // sideways shove the pop gives you, away from the tagger
 const BOOTS_SPEED_MULT = 1.5;
 const POWERUP_FIRST_DELAY = 5; // seconds into the round before the first one appears
 const POWERUP_RESPAWN = 8; // seconds after a pickup before the next one appears
@@ -563,6 +567,7 @@ function snapshot() {
       sl: Math.max(0, Math.round((p.slowUntil - t) * 10) / 10), // slowed by a trap, time left (s)
       tc: p.trapHits, // trap counter, lets clients splash + play a sound
       iv: Math.max(0, Math.round((p.cloakUntil - t) * 10) / 10), // invisibility time left (s)
+      sh: p.shield ? 1 : 0, // holding a shield
       dm: p.dashMode === 'slide' ? 1 : p.dashMode === 'air' ? 2 : 0,
       dc: p.dashes,
       cd: Math.max(0, Math.round((p.dashReadyAt - t) * 20) / 20), // dash cooldown left (s)
@@ -600,6 +605,7 @@ function resetBody(p, spawnX) {
   p.boosts = p.boosts ?? 0; // counter so clients can animate the pad + play a sound
   p.speedUntil = 0; // speed boots active until this time
   p.cloakUntil = 0; // invisible until this time
+  p.shield = false; // blocks the next tag, then pops
   p.slowUntil = 0; // slowed by a trap until this time
   p.inTrap = false;
   p.trapHits = p.trapHits ?? 0;
@@ -684,6 +690,7 @@ function updatePowerup(active, t) {
     const cy = Math.max(p.y, Math.min(powerup.y, p.y + PLAYER_H));
     if (Math.hypot(powerup.x - cx, powerup.y - cy) > POWERUP_R) continue;
     if (powerup.kind === 'boots') p.speedUntil = t + BOOTS_SECONDS;
+    else if (powerup.kind === 'shield') p.shield = true;
     else p.cloakUntil = t + CLOAK_SECONDS;
     broadcast({ t: 'powerup', id: p.id, kind: powerup.kind });
     powerup = null;
@@ -960,17 +967,26 @@ function checkTag(active, t) {
   if (!it || it.waiting || t < it.frozenUntil) return;
   for (const p of active) {
     if (p === it || t < p.immuneUntil) continue;
-    if (overlaps(it, p)) {
-      itId = p.id;
-      it.immuneUntil = t + IMMUNE_SECONDS;
-      it.tags++;
-      p.frozenUntil = t + FREEZE_SECONDS;
+    if (!overlaps(it, p)) continue;
+    if (p.shield) {
+      // The shield takes the hit: nobody changes roles and a hot potato fuse keeps burning
+      p.shield = false;
+      p.immuneUntil = t + SHIELD_GRACE;
+      const away = Math.sign(p.x - it.x) || -it.facing;
+      p.vx = away * SHIELD_BOUNCE;
       p.dashMode = null;
-      p.vx = 0;
-      if (mode === 'potato') phaseEndsAt = p.frozenUntil + fuseSeconds; // passing the potato resets its fuse
-      broadcast({ t: 'tag', from: it.id, to: p.id });
+      broadcast({ t: 'block', from: it.id, to: p.id, x: Math.round(p.x + PLAYER_W / 2), y: Math.round(p.y + PLAYER_H / 2), hidden: t < p.cloakUntil });
       return;
     }
+    itId = p.id;
+    it.immuneUntil = t + IMMUNE_SECONDS;
+    it.tags++;
+    p.frozenUntil = t + FREEZE_SECONDS;
+    p.dashMode = null;
+    p.vx = 0;
+    if (mode === 'potato') phaseEndsAt = p.frozenUntil + fuseSeconds; // passing the potato resets its fuse
+    broadcast({ t: 'tag', from: it.id, to: p.id });
+    return;
   }
 }
 
