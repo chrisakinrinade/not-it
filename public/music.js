@@ -16,6 +16,7 @@ const Music = (() => {
   let muted = false;
   try { muted = localStorage.getItem('tagMuted') === '1'; } catch {}
 
+  let requested = null; // what the client asked for ('game' means any round track)
   let desired = null; // song name we want playing (may be set before unlock)
   let current = null;
   let timer = null;
@@ -81,6 +82,47 @@ const Music = (() => {
     E5 G5 C6 G5 E5 G5 A5 G5 | E5 -  C5 E5 A5 -  G5 E5 | F5 A5 C6 A5 F5 A5 G5 F5 | D5 G5 B5 G5 D5 -  G5 - |
     C6 -  B5 C6 G5 -  E5 G5 | A5 -  G5 A5 E5 -  C5 E5 | F5 -  A5 -  C6 -  A5 F5 | G5 F5 E5 D5 B4 -  -  -`);
 
+  // Am – F – C – G
+  const CHASE_MELODY = bars(`
+    A5 -  E5 A5 C6 B5 A5 E5 | F5 -  A5 C6 A5 -  G5 F5 | E5 G5 C6 -  G5 E5 G5 -  | D5 G5 B5 D6 B5 -  G5 - |
+    A5 C6 E6 -  D6 C6 B5 A5 | C6 -  A5 F5 A5 C6 F6 -  | E6 D6 C6 G5 E5 G5 C6 -  | B5 -  D6 -  B5 G5 E5 -`);
+
+  // F – Dm – Bb – C
+  const BOUNCE_MELODY = bars(`
+    C5 F5 A5 F5 C6 -  A5 -  | D5 F5 A5 -  F5 D5 F5 -  | D5 F5 Bb5 - A5 G5 F5 D5 | E5 -  G5 -  C6 -  Bb5 G5 |
+    A5 -  C6 A5 F5 -  C5 -  | F5 -  A5 F5 D5 -  A4 -  | Bb4 D5 F5 Bb5 D6 - C6 Bb5 | A5 G5 F5 E5 C5 -  -  -`);
+
+  // D – C – G – D
+  const SPRINT_MELODY = bars(`
+    D5 F#5 A5 D6 A5 F#5 A5 - | C6 -  G5 E5 G5 -  C6 -  | B5 A5 G5 D5 G5 B5 D6 -  | A5 -  F#5 - D5 -  -  - |
+    F#5 A5 D6 -  E6 D6 C6 A5 | G5 -  E5 G5 C6 -  E6 -  | D6 C6 B5 G5 D5 G5 B5 -  | A5 F#5 E5 D5 A4 - D5 -`);
+
+  // An in-round loop: drums, a triangle bass on eighths (bass[i] multiplies
+  // the bar's root, null rests) and a lead melody.
+  function roundSong({ bpm, roots, melody, kicks, bass, lead = 'square', leadVol = 0.08, hats16 = false }) {
+    return {
+      bpm,
+      play(step, t, sd) {
+        const bar = Math.floor(step / 16) % melody.length;
+        const s = step % 16;
+        if (kicks.includes(s)) kick(t);
+        if (s === 4 || s === 12) snare(t);
+        if (s % 2 === 0) hat(t, s % 4 === 2 ? 0.09 : 0.05);
+        else if (hats16) hat(t, 0.025);
+        if (s % 2 === 0) {
+          const i = s / 2;
+          if (bass[i] != null) tone(t, freq(roots[bar % roots.length]) * bass[i], sd * 1.6, 'triangle', 0.32);
+          const notes = melody[bar];
+          if (notes[i] !== '-') {
+            let len = 1;
+            while (i + len < notes.length && notes[i + len] === '-') len++;
+            tone(t, freq(notes[i]), sd * 2 * len * 0.9, lead, leadVol);
+          }
+        }
+      },
+    };
+  }
+
   const LOBBY_CHORDS = [
     ['C4', 'E4', 'G4', 'C5'],
     ['A3', 'C4', 'E4', 'A4'],
@@ -100,26 +142,23 @@ const Music = (() => {
         if (s % 4 === 2) hat(t, 0.035);
       },
     },
-    game: {
-      bpm: 140,
-      play(step, t, sd) {
-        const bar = Math.floor(step / 16) % GAME_MELODY.length;
-        const s = step % 16;
-        if (s === 0 || s === 8 || s === 10) kick(t);
-        if (s === 4 || s === 12) snare(t);
-        if (s % 2 === 0) hat(t, s % 4 === 2 ? 0.09 : 0.05);
-        if (s % 2 === 0) {
-          tone(t, freq(ROOTS[bar % 4]) * (s % 4 === 2 ? 2 : 1), sd * 1.6, 'triangle', 0.32);
-          const notes = GAME_MELODY[bar];
-          const i = s / 2;
-          if (notes[i] !== '-') {
-            let len = 1;
-            while (i + len < notes.length && notes[i + len] === '-') len++;
-            tone(t, freq(notes[i]), sd * 2 * len * 0.9, 'square', 0.08);
-          }
-        }
-      },
-    },
+    // In-round tracks: play('game') picks one at random each round.
+    game: roundSong({
+      bpm: 140, roots: ROOTS, melody: GAME_MELODY,
+      kicks: [0, 8, 10], bass: [1, 2, 1, 2, 1, 2, 1, 2],
+    }),
+    chase: roundSong({
+      bpm: 150, roots: ['A2', 'F2', 'C3', 'G2'], melody: CHASE_MELODY,
+      kicks: [0, 6, 8, 14], bass: [1, 1, 2, 1, 1, 1, 2, 1.5],
+    }),
+    bounce: roundSong({
+      bpm: 128, roots: ['F2', 'D2', 'Bb2', 'C3'], melody: BOUNCE_MELODY,
+      kicks: [0, 6, 8], bass: [1, 2, 1.5, 2, 1, 2, 1.5, 2], lead: 'triangle', leadVol: 0.2,
+    }),
+    sprint: roundSong({
+      bpm: 160, roots: ['D3', 'C3', 'G2', 'D3'], melody: SPRINT_MELODY,
+      kicks: [0, 4, 8, 12], bass: [1, 1, 2, 1, 1, 1, 2, 1], hats16: true,
+    }),
   };
 
   // ---- Scheduler ----
@@ -223,14 +262,24 @@ const Music = (() => {
     if (ctx.state === 'suspended' && !document.hidden) ctx.resume();
   }
 
+  const ROUND_SONGS = ['game', 'chase', 'bounce', 'sprint'];
+  let lastRoundSong = null;
+  function pickRoundSong() {
+    const choices = ROUND_SONGS.filter((n) => n !== lastRoundSong);
+    lastRoundSong = choices[Math.floor(Math.random() * choices.length)];
+    return lastRoundSong;
+  }
+
   function play(name) {
-    if (desired === name) return;
-    desired = name;
+    if (requested === name) return;
+    requested = name;
+    desired = name === 'game' ? pickRoundSong() : name;
     tempoMul = 1;
     startDesired();
   }
 
   function jingle(win) {
+    requested = null;
     desired = null;
     stopScheduler();
     if (!ctx) return;
@@ -365,5 +414,5 @@ const Music = (() => {
 
   setupPlaybackSession();
 
-  return { unlock, play, jingle, whoosh, sfx, setUrgent, toggleMute, isMuted: () => muted };
+  return { unlock, play, jingle, nowPlaying: () => desired, whoosh, sfx, setUrgent, toggleMute, isMuted: () => muted };
 })();

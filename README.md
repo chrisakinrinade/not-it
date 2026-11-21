@@ -36,7 +36,7 @@ If macOS asks whether to allow incoming connections for `node`, click **Allow**.
 - People who join mid-round watch and play from the next round.
 - After each round a scoreboard shows everyone's time as IT, tags made, and session wins (🏆). Everyone except the loser gets a win. Wins are kept by name until the server restarts.
 - Sound effects for tags, jumps, landings, traps, the 3-2-1-GO countdown and the last 5 seconds.
-- Music: a chill lobby loop, an upbeat in-game loop that speeds up in the last 10s, and a win/lose jingle. Toggle with the 🔊 button or **M**. It plays on iPhone even with the silent switch on.
+- Music: a chill lobby loop, four upbeat in-round tracks (one picked at random each round, never the same twice in a row) that speed up in the last 10s, and a win/lose jingle. Toggle with the 🔊 button or **M**. It plays on iPhone even with the silent switch on.
 
 ## Code
 
