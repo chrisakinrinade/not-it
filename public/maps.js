@@ -8,6 +8,7 @@
 const PORTAL_COLORS = [
   { glow: '132, 94, 247', arm1: '#9775fa', arm2: '#e599f7', speck: '229, 153, 247', inner: 'rgba(208, 191, 255, 0.85)', rim: '#3b1d6e' },
   { glow: '21, 170, 191', arm1: '#22b8cf', arm2: '#96f2d7', speck: '150, 242, 215', inner: 'rgba(197, 246, 250, 0.85)', rim: '#0b4f5c' },
+  { glow: '247, 103, 7', arm1: '#fd7e14', arm2: '#ffd43b', speck: '255, 212, 59', inner: 'rgba(255, 236, 179, 0.85)', rim: '#6e2a05' },
 ];
 
 const THEMES = {
@@ -52,6 +53,40 @@ const THEMES = {
     platform: { body: '#7c858f', top: '#69db7c', ground: '#5c3d1e', groundTop: '#37b24d', groundEdge: '#2f9e44' },
     trap: { goo: '#5e3b1c', light: '#a47148', bubble: '214, 170, 120' }, // mud
     scenery: drawJungle,
+  },
+  volcano: {
+    sky: ['#2b0a0a', '#a8321e'],
+    embers: true,
+    clouds: 'rgba(60, 30, 30, 0.45)', // smoke
+    platform: { body: '#3d3335', top: '#8a7476', ground: '#2a2022', groundTop: '#4a3b3d', groundEdge: '#ff6b1a' },
+    trap: { goo: '#ff6b1a', light: '#ffe066', bubble: '255, 220, 120' }, // magma
+    scenery: drawVolcano,
+  },
+  ocean: {
+    sky: ['#0b4a7a', '#3bc9db'],
+    sun: { color: 'rgba(230, 252, 255, 0.5)', r: 46, fx: 0.5, fy: 0.05, glow: true }, // light from the surface
+    bubbles: true,
+    platform: { body: '#c06a7c', top: '#ff8fab', ground: '#d8b878', groundTop: '#f1dca7', groundEdge: '#c9a865' },
+    trap: { goo: '#2b8a3e', light: '#8ce99a', bubble: '200, 255, 220' }, // seaweed
+    scenery: drawReef,
+  },
+  candy: {
+    sky: ['#f783ac', '#ffe3f1'],
+    sun: { color: '#fff0f6', r: 36, fx: 0.15, fy: 0.15, glow: true },
+    clouds: 'rgba(255, 255, 255, 0.9)',
+    sprinkles: true,
+    platform: { body: '#6b3e26', top: '#fff0f6', ground: '#7a4128', groundTop: '#fcc2d7', groundEdge: '#f06595' },
+    trap: { goo: '#c77d22', light: '#ffd8a8', bubble: '255, 230, 190' }, // caramel
+    scenery: drawCandy,
+  },
+  city: {
+    sky: ['#120b2e', '#5f3dc4'],
+    stars: true,
+    moon: { color: '#fff3bf', r: 26, fx: 0.86, fy: 0.12 },
+    clouds: 'rgba(200, 160, 255, 0.12)',
+    platform: { body: '#343a40', top: '#22d3ee', ground: '#212529', groundTop: '#495057', groundEdge: '#f783ac' },
+    trap: { goo: '#4c2f7a', light: '#d0bfff', bubble: '208, 191, 255' }, // oil slick
+    scenery: drawCity,
   },
 };
 
@@ -127,6 +162,59 @@ function drawSkyLayer(g, theme, w, h, camX, camY, time) {
       const y = (((seeded(i + 50) * h + time * speed - camY * 0.2) % h) + h) % h;
       const size = 1 + seeded(i + 400) * 1.8;
       fillEllipse(g, x, y, size, size);
+    }
+  }
+
+  if (theme.embers) {
+    for (let i = 0; i < 50; i++) {
+      const speed = 25 + seeded(i + 300) * 45;
+      const x = (((seeded(i) * w + Math.sin(time * 1.2 + i) * 14 - camX * 0.2) % w) + w) % w;
+      const y = h - ((((seeded(i + 50) * h + time * speed + camY * 0.2) % h) + h) % h);
+      g.fillStyle = `rgba(255, ${140 + Math.floor(seeded(i + 7) * 90)}, 60, ${0.4 + 0.5 * Math.abs(Math.sin(time * 3 + i))})`;
+      fillEllipse(g, x, y, 1.5 + seeded(i + 400) * 1.5, 1.5 + seeded(i + 400) * 1.5);
+    }
+  }
+
+  if (theme.bubbles) {
+    g.lineWidth = 1.5;
+    for (let i = 0; i < 40; i++) {
+      const speed = 30 + seeded(i + 300) * 40;
+      const x = (((seeded(i) * w + Math.sin(time * 2 + i) * 8 - camX * 0.25) % w) + w) % w;
+      const y = h - ((((seeded(i + 50) * h + time * speed + camY * 0.25) % h) + h) % h);
+      const r = 2 + seeded(i + 400) * 4;
+      g.strokeStyle = 'rgba(230, 252, 255, 0.55)';
+      g.beginPath();
+      g.arc(x, y, r, 0, Math.PI * 2);
+      g.stroke();
+    }
+    // Light rays from the surface
+    g.fillStyle = 'rgba(230, 252, 255, 0.07)';
+    for (let i = 0; i < 5; i++) {
+      const x = (((i * w) / 4 + Math.sin(time * 0.3 + i) * 30 - camX * 0.1) % (w + 200)) - 100;
+      g.beginPath();
+      g.moveTo(x, 0);
+      g.lineTo(x + 70, 0);
+      g.lineTo(x + 200, h);
+      g.lineTo(x + 90, h);
+      g.closePath();
+      g.fill();
+    }
+  }
+
+  if (theme.sprinkles) {
+    const colors = ['#ff6b6b', '#fcc419', '#51cf66', '#4dabf7', '#ffffff', '#cc5de8'];
+    g.lineWidth = 2.5;
+    g.lineCap = 'round';
+    for (let i = 0; i < 45; i++) {
+      const speed = 14 + seeded(i + 300) * 20;
+      const x = (((seeded(i) * w + Math.sin(time * 0.6 + i) * 20 - camX * 0.2) % w) + w) % w;
+      const y = (((seeded(i + 50) * h + time * speed - camY * 0.2) % h) + h) % h;
+      const a = time * (1 + seeded(i + 9)) + i;
+      g.strokeStyle = colors[i % colors.length];
+      g.beginPath();
+      g.moveTo(x - Math.cos(a) * 3, y - Math.sin(a) * 3);
+      g.lineTo(x + Math.cos(a) * 3, y + Math.sin(a) * 3);
+      g.stroke();
     }
   }
 
@@ -276,6 +364,196 @@ function drawJungle(g, groundY, width) {
     g.fillStyle = '#51cf66';
     for (let k = 1; k <= 3; k++) fillEllipse(g, x + (k % 2 ? 5 : -5), (len * k) / 4, 6, 3);
   }
+}
+
+function drawVolcano(g, groundY, width) {
+  // Far volcano with a glowing crater and lava streaks
+  const cx = width / 2;
+  g.fillStyle = '#4a1d1a';
+  g.beginPath();
+  g.moveTo(cx - 620, groundY + 2);
+  g.lineTo(cx - 110, groundY - 560);
+  g.lineTo(cx + 110, groundY - 560);
+  g.lineTo(cx + 620, groundY + 2);
+  g.closePath();
+  g.fill();
+  const glow = g.createRadialGradient(cx, groundY - 560, 10, cx, groundY - 560, 200);
+  glow.addColorStop(0, 'rgba(255, 146, 43, 0.75)');
+  glow.addColorStop(1, 'rgba(255, 146, 43, 0)');
+  g.fillStyle = glow;
+  fillEllipse(g, cx, groundY - 560, 200, 200);
+  // Lava streaks: a soft glow under a brighter core
+  g.lineCap = 'round';
+  for (const [x1, x2] of [[-60, -230], [70, 300]]) {
+    for (const [width, color] of [[16, 'rgba(255, 107, 26, 0.25)'], [5, 'rgba(255, 146, 43, 0.55)']]) {
+      g.strokeStyle = color;
+      g.lineWidth = width;
+      g.beginPath();
+      g.moveTo(cx + x1, groundY - 555);
+      g.quadraticCurveTo(cx + x1 * 0.6, groundY - 300, cx + x2, groundY - 40);
+      g.stroke();
+    }
+  }
+  // Near rocky spires
+  g.fillStyle = '#2d1414';
+  for (const [fx, half, h] of [[0.06, 120, 300], [0.2, 90, 200], [0.8, 90, 220], [0.95, 130, 320]]) {
+    g.beginPath();
+    g.moveTo(width * fx - half, groundY + 2);
+    g.lineTo(width * fx - half * 0.25, groundY - h);
+    g.lineTo(width * fx + half * 0.3, groundY - h * 0.85);
+    g.lineTo(width * fx + half, groundY + 2);
+    g.closePath();
+    g.fill();
+  }
+  // Stalactites along the cave ceiling
+  g.fillStyle = '#1f0d0d';
+  g.fillRect(0, 0, width, 14);
+  for (let i = 0; i < 28; i++) {
+    const x = ((i + 0.5) * width) / 28;
+    const len = 30 + seeded(i + 60) * 70;
+    g.beginPath();
+    g.moveTo(x - 16, 12);
+    g.lineTo(x, 12 + len);
+    g.lineTo(x + 16, 12);
+    g.closePath();
+    g.fill();
+  }
+}
+
+function drawReef(g, groundY, width) {
+  // Distant rocks
+  g.fillStyle = '#16659a';
+  for (const [x, rx, ry] of [[0.1, 260, 170], [0.5, 340, 140], [0.9, 280, 190]]) fillEllipse(g, width * x, groundY + 20, rx, ry);
+  // Swaying kelp
+  g.strokeStyle = '#2f9e44';
+  g.lineWidth = 7;
+  g.lineCap = 'round';
+  for (let i = 0; i < 16; i++) {
+    const x = ((i + 0.5) * width) / 16 + (seeded(i) - 0.5) * 50;
+    const len = 160 + seeded(i + 20) * 260;
+    g.beginPath();
+    g.moveTo(x, groundY + 2);
+    g.bezierCurveTo(x + 30, groundY - len * 0.3, x - 30, groundY - len * 0.7, x + (seeded(i + 40) - 0.5) * 40, groundY - len);
+    g.stroke();
+  }
+  // Coral fans and brain coral on the sea floor
+  const colors = ['#ff6b6b', '#ffa94d', '#f783ac', '#cc5de8'];
+  for (let i = 0; i < 11; i++) {
+    const x = ((i + 0.3) * width) / 11;
+    g.strokeStyle = colors[i % colors.length];
+    g.lineWidth = 5;
+    for (let k = -2; k <= 2; k++) {
+      g.beginPath();
+      g.moveTo(x, groundY + 2);
+      g.quadraticCurveTo(x + k * 8, groundY - 30, x + k * 18, groundY - 55 - seeded(i * 5 + k) * 25);
+      g.stroke();
+    }
+    g.fillStyle = colors[(i + 2) % colors.length];
+    fillEllipse(g, x + 60, groundY - 6, 22, 14);
+  }
+  // Sunken ship hull behind the middle
+  const cx = width / 2;
+  g.fillStyle = '#5c3d2e';
+  g.beginPath();
+  g.moveTo(cx - 240, groundY - 120);
+  g.lineTo(cx + 260, groundY - 150);
+  g.lineTo(cx + 200, groundY + 2);
+  g.lineTo(cx - 200, groundY + 2);
+  g.closePath();
+  g.fill();
+  g.fillStyle = '#3e2a1f';
+  g.fillRect(cx - 10, groundY - 420, 14, 290); // broken mast
+  g.fillStyle = 'rgba(16, 60, 90, 0.8)';
+  for (const k of [-1, 0, 1]) fillEllipse(g, cx + k * 110, groundY - 70, 14, 14); // portholes
+}
+
+function drawCandy(g, groundY, width) {
+  // Pink frosting hills with drips
+  for (const [fx, rx, ry, color] of [[0.15, 320, 180, '#faa2c1'], [0.85, 340, 200, '#faa2c1'], [0.5, 420, 150, '#f783ac']]) {
+    g.fillStyle = color;
+    fillEllipse(g, width * fx, groundY + 20, rx, ry);
+  }
+  // Giant lollipops
+  for (const [fx, h, r, a, b] of [[0.08, 330, 50, '#ff6b6b', '#fff'], [0.32, 240, 38, '#4dabf7', '#fff'], [0.68, 280, 44, '#51cf66', '#fff'], [0.93, 360, 54, '#cc5de8', '#fff']]) {
+    const x = width * fx;
+    g.fillStyle = '#f8f9fa';
+    g.fillRect(x - 5, groundY - h, 10, h + 2);
+    const top = groundY - h - r;
+    g.fillStyle = a;
+    fillEllipse(g, x, top, r, r);
+    g.strokeStyle = b;
+    g.lineWidth = r * 0.18;
+    g.beginPath();
+    for (let t = 0; t < 4 * Math.PI; t += 0.2) {
+      const rr = (t / (4 * Math.PI)) * r * 0.9;
+      const px = x + Math.cos(t) * rr;
+      const py = top + Math.sin(t) * rr;
+      if (t === 0) g.moveTo(px, py);
+      else g.lineTo(px, py);
+    }
+    g.stroke();
+  }
+  // Candy canes
+  g.lineCap = 'round';
+  for (const fx of [0.2, 0.45, 0.58, 0.8]) {
+    const x = width * fx;
+    for (const [color, wdt, dash] of [['#fff', 12, []], ['#fa5252', 12, [10, 10]]]) {
+      g.strokeStyle = color;
+      g.lineWidth = wdt;
+      g.setLineDash(dash);
+      g.beginPath();
+      g.moveTo(x, groundY + 2);
+      g.lineTo(x, groundY - 150);
+      g.arc(x + 22, groundY - 150, 22, Math.PI, 0);
+      g.stroke();
+    }
+  }
+  g.setLineDash([]);
+}
+
+function drawCity(g, groundY, width) {
+  // Two layers of skyscrapers with lit windows
+  for (const [layer, color, win] of [[0, '#2b1f5c', 'rgba(255, 224, 102, 0.35)'], [1, '#1b1338', 'rgba(255, 224, 102, 0.75)']]) {
+    let x = layer ? -30 : 10;
+    let i = layer * 50;
+    while (x < width) {
+      const bw = 90 + seeded(i) * 90;
+      const bh = (layer ? 160 : 300) + seeded(i + 1) * (layer ? 240 : 380);
+      g.fillStyle = color;
+      g.fillRect(x, groundY - bh, bw, bh + 2);
+      g.fillStyle = win;
+      for (let wy = groundY - bh + 16; wy < groundY - 20; wy += 26) {
+        for (let wx = x + 12; wx < x + bw - 16; wx += 22) {
+          if (seeded(wx * 0.37 + wy * 0.11) > 0.45) g.fillRect(wx, wy, 9, 12);
+        }
+      }
+      x += bw + 14 + seeded(i + 2) * 30;
+      i += 3;
+    }
+  }
+  // Neon signs: round shapes so they never read as platforms
+  g.lineWidth = 4;
+  g.lineCap = 'round';
+  for (const [fx, y, color, kind] of [[0.18, 470, '#f783ac', 'ring'], [0.55, 560, '#ffd43b', 'bolt'], [0.82, 430, '#b197fc', 'ring']]) {
+    const x = width * fx;
+    const cy = groundY - y;
+    g.strokeStyle = color;
+    g.shadowColor = color;
+    g.shadowBlur = 14;
+    g.beginPath();
+    if (kind === 'ring') {
+      g.arc(x, cy, 22, 0, Math.PI * 2);
+      g.moveTo(x + 10, cy);
+      g.arc(x, cy, 10, 0, Math.PI * 2);
+    } else {
+      g.moveTo(x + 8, cy - 26);
+      g.lineTo(x - 10, cy + 2);
+      g.lineTo(x + 4, cy + 2);
+      g.lineTo(x - 8, cy + 28);
+    }
+    g.stroke();
+  }
+  g.shadowBlur = 0;
 }
 
 function drawScenery(g, theme, platforms) {

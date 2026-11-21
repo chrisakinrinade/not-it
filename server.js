@@ -37,7 +37,13 @@ const padOn = (x, platformY, power = 1300) => ({ x, y: platformY, w: PAD_W, powe
 // Traps are sticky patches on a platform's top surface: step in one and you're
 // slowed for a few seconds.
 const trapOn = (x, platformY, w) => ({ x, y: platformY, w });
-const mirror = (list) => list.map((pl) => plat(WORLD.width - pl.x - pl.w, pl.y, pl.w));
+const mirror = (list, world = WORLD) => list.map((pl) => plat(world.width - pl.x - pl.w, pl.y, pl.w));
+
+// Zig-zag cliff up the left wall of Lava Caverns (mirrored on the right)
+const LAVA_CLIFF = [
+  plat(140, 775, 160), plat(280, 690, 140), plat(40, 605, 170), plat(260, 520, 160),
+  plat(40, 435, 170), plat(260, 350, 160), plat(40, 265, 170), plat(260, 180, 150),
+];
 
 const NIGHT_STAIRS = [plat(40, 577, 140), plat(200, 492, 140), plat(40, 407, 140), plat(200, 322, 140), plat(40, 237, 140)];
 
@@ -187,6 +193,154 @@ const MAPS = {
     ],
     powerupSpots: [[140, 775], [1460, 775], [800, 605], [590, 435], [1010, 435], [330, 180], [1260, 180], [800, 180]],
     spawns: [220, 1360, 560, 1080, 420, 1180, 960, 1530],
+  },
+  lava: {
+    name: 'Lava Caverns',
+    theme: 'volcano',
+    world: BIG_WORLD,
+    platforms: [
+      bigGround,
+      // Cliffs up both walls, with lift shafts between them and the volcano
+      ...LAVA_CLIFF,
+      ...mirror(LAVA_CLIFF, BIG_WORLD),
+      // Stepped volcano cone in the middle, then ledges up through the smoke
+      plat(560, 775, 480), plat(640, 690, 320), plat(690, 605, 220), plat(730, 520, 140),
+      plat(540, 435, 140), plat(920, 435, 140),
+      plat(720, 350, 160),
+      plat(520, 265, 150), plat(930, 265, 150),
+      plat(720, 180, 160),
+      plat(440, 840, 80, { dx: 0, dy: -580, period: 8 }), // left lift shaft
+      plat(1080, 260, 80, { dx: 0, dy: 580, period: 8 }), // right lift shaft, out of step with the left
+      plat(300, 95, 120, { dx: 880, dy: 0, period: 9 }), // smoke cloud drifting over the top
+    ],
+    portals: [
+      portalOn(125, 605), portalOn(1475, 605), // lava tube between the two cliffs
+      portalOn(620, 860), portalOn(1265, 180), // ground by the volcano <-> high right ledge
+    ],
+    pads: [
+      padOn(30, 860, 1500), // left wall -> five tiers up
+      padOn(1530, 860, 1500), // right wall
+      padOn(780, 520), // eruption: volcano top -> the ledge above the smoke
+    ],
+    traps: [
+      trapOn(740, 860, 120), // magma pool at the foot of the volcano
+      trapOn(760, 605, 80), // on the cone
+      trapOn(760, 350, 80),
+    ],
+    powerupSpots: [[220, 775], [1380, 775], [800, 690], [610, 435], [990, 435], [125, 435], [1475, 435], [595, 265]],
+    spawns: [180, 1390, 380, 1200, 280, 1000, 490, 1100],
+  },
+  reef: {
+    name: 'Coral Reef',
+    theme: 'ocean',
+    world: BIG_WORLD,
+    platforms: [
+      bigGround,
+      plat(80, 775, 160), plat(520, 775, 160), plat(920, 775, 160), plat(1360, 775, 160),
+      plat(300, 690, 160), plat(1140, 690, 160),
+      plat(40, 605, 180), plat(1380, 605, 180),
+      plat(260, 520, 170), plat(700, 520, 200), plat(1170, 520, 170), // sunken ship's deck in the middle
+      plat(40, 435, 170), plat(480, 435, 150), plat(970, 435, 150), plat(1390, 435, 170),
+      plat(240, 350, 160), plat(1200, 350, 160),
+      plat(40, 265, 170), plat(680, 265, 240), plat(1390, 265, 170),
+      plat(260, 180, 150), plat(1190, 180, 150),
+      plat(720, 690, 160, { dx: 0, dy: -85, period: 4 }), // jellyfish bobbing up to the deck
+      plat(460, 350, 120, { dx: 560, dy: 0, period: 6 }), // current sweeping across the middle
+      plat(740, 180, 120, { dx: 0, dy: -85, period: 4 }), // jellyfish over the coral arch
+    ],
+    portals: [
+      portalOn(60, 860), portalOn(1265, 180), // sea floor left <-> high right
+      portalOn(1540, 860), portalOn(335, 180), // sea floor right <-> high left
+    ],
+    pads: [
+      padOn(780, 860, 1500), // geyser under the shipwreck
+      padOn(380, 860),
+      padOn(1180, 860),
+    ],
+    traps: [
+      // Tangles of sticky seaweed
+      trapOn(560, 775, 80),
+      trapOn(960, 775, 80),
+      trapOn(720, 265, 80),
+    ],
+    powerupSpots: [[160, 775], [1440, 775], [800, 520], [555, 435], [1045, 435], [125, 265], [1475, 265], [860, 265]],
+    spawns: [160, 1420, 280, 1300, 560, 1000, 660, 900],
+  },
+  candy: {
+    name: 'Candy Clouds',
+    theme: 'candy',
+    world: BIG_WORLD,
+    platforms: [
+      bigGround,
+      plat(100, 775, 200), plat(700, 775, 200), plat(1300, 775, 200),
+      plat(380, 690, 160), plat(1060, 690, 160),
+      plat(60, 605, 180), plat(620, 605, 360), plat(1360, 605, 180),
+      plat(300, 520, 160), plat(1140, 520, 160),
+      plat(60, 435, 160), plat(700, 435, 200), plat(1380, 435, 160),
+      plat(320, 350, 160), plat(1120, 350, 160),
+      plat(60, 265, 160), plat(640, 265, 320), plat(1380, 265, 160),
+      plat(320, 180, 160), plat(1120, 180, 160),
+      plat(700, 95, 200), // the cherry on top
+      plat(500, 350, 100, { dx: 500, dy: 0, period: 6 }), // cotton-candy cloud across the middle
+      plat(160, 95, 100, { dx: 0, dy: 255, period: 7 }), // left gumball lift between the top tiers
+      plat(1340, 350, 100, { dx: 0, dy: -255, period: 7 }), // right gumball lift
+    ],
+    portals: [
+      portalOn(140, 435), portalOn(1460, 435), // across the middle
+      portalOn(800, 860), portalOn(400, 180), // under the big gumdrop <-> high left
+    ],
+    pads: [
+      // Bouncy gumdrops
+      padOn(560, 860),
+      padOn(1000, 860),
+      padOn(780, 605, 1000), // middle ledge -> one tier up
+      padOn(780, 265, 1000), // top ledge -> the cherry
+    ],
+    traps: [
+      // Sticky caramel
+      trapOn(400, 860, 100),
+      trapOn(1100, 860, 100),
+      trapOn(660, 605, 70),
+    ],
+    powerupSpots: [[200, 775], [1400, 775], [800, 775], [140, 605], [1460, 605], [800, 435], [800, 95], [400, 350]],
+    spawns: [120, 1450, 260, 1300, 660, 900, 1220, 330],
+  },
+  city: {
+    name: 'Neon City',
+    theme: 'city',
+    world: BIG_WORLD,
+    platforms: [
+      bigGround,
+      plat(160, 775, 200), plat(700, 775, 200), plat(1240, 775, 200),
+      plat(420, 690, 180), plat(1000, 690, 180),
+      plat(40, 605, 220), plat(660, 605, 280), plat(1340, 605, 220),
+      plat(300, 520, 180), plat(1120, 520, 180),
+      plat(40, 435, 200), plat(560, 435, 180), plat(860, 435, 180), plat(1360, 435, 200),
+      plat(300, 350, 170), plat(1130, 350, 170),
+      plat(40, 265, 200), plat(700, 265, 200), plat(1360, 265, 200),
+      plat(300, 180, 170), plat(1130, 180, 170),
+      plat(765, 690, 70, { dx: 0, dy: -425, period: 7 }), // elevator up the middle tower
+      plat(500, 520, 120, { dx: 480, dy: 0, period: 6 }), // sky tram between the side towers
+      plat(420, 95, 120, { dx: 640, dy: 0, period: 8 }), // crane hook over the rooftops
+    ],
+    portals: [
+      // Three subway lines
+      portalOn(60, 860), portalOn(1460, 265),
+      portalOn(1540, 860), portalOn(140, 265),
+      portalOn(150, 605), portalOn(1450, 605),
+    ],
+    pads: [
+      padOn(400, 860),
+      padOn(1160, 860),
+    ],
+    traps: [
+      // Oil slicks
+      trapOn(740, 860, 120),
+      trapOn(330, 350, 80),
+      trapOn(1190, 350, 80),
+    ],
+    powerupSpots: [[260, 775], [1340, 775], [700, 605], [140, 435], [1460, 435], [650, 435], [950, 435], [800, 265]],
+    spawns: [160, 1420, 280, 1300, 560, 1000, 640, 940],
   },
 };
 for (const map of Object.values(MAPS)) map.world ??= WORLD;
