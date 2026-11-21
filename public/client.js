@@ -115,6 +115,9 @@
         if (m.kind === 'cloak') {
           showToast(m.id === myId ? "You're invisible! 👻" : `${nameOf(m.id)} vanished! 👻`);
           if (m.id === myId) Music.sfx('cloak');
+        } else if (m.kind === 'wings') {
+          showToast(m.id === myId ? 'Wings! Jump again in mid-air 🪽' : `${nameOf(m.id)} grabbed wings! 🪽`);
+          if (m.id === myId) Music.sfx('powerup');
         } else {
           showToast(m.id === myId ? 'Speed boots! 👟' : `${nameOf(m.id)} grabbed speed boots! 👟`);
           if (m.id === myId) Music.sfx('powerup');
@@ -761,6 +764,7 @@
         }
       }
       if (p.sl > 0) drawStuckFeet(ctx, trapColors, p, cx, feetY, time);
+      if (p.dj > 0) drawPlayerWings(ctx, p, cx, time);
       if (p.dm === 1) {
         // Slide: squashed toward the feet, kicking up dust
         ctx.fillStyle = 'rgba(255, 255, 255, 0.45)';
@@ -871,27 +875,72 @@
     fillEllipse(g, cx - 6, feetY - 4, 5, 1.5);
   }
 
+  // Wings power-up: a pair flapping on the player's back (folded once the air jump is used)
+  function drawPlayerWings(g, p, cx, time) {
+    const flap = p.g ? Math.sin(time * 4) * 0.08 : Math.sin(time * 14) * 0.35;
+    const cy = p.y + pSize.h * 0.42;
+    for (const side of [-1, 1]) {
+      g.save();
+      g.translate(cx - p.f * 3 + side * 11, cy);
+      g.scale(side, 1);
+      g.rotate(0.1 - flap);
+      drawWing(g, 8, -6, 1.05); // wing root sits at the origin, tip sweeps up and out
+      g.restore();
+    }
+  }
+
+  // ---- Double jumps: a puff of feathers under whoever jumped in mid-air ----
+  const airPuffs = []; // { x, y, at }
+  const lastAirJumps = new Map(); // player id -> mid-air jump count last seen
+
+  function detectAirJumps(state) {
+    for (const p of state.players) {
+      const prev = lastAirJumps.get(p.id);
+      lastAirJumps.set(p.id, p.ac);
+      if (prev === undefined || prev === p.ac) continue;
+      if (p.iv > 0 && p.id !== myId) continue; // don't give away an invisible player
+      airPuffs.push({ x: p.x + pSize.w / 2, y: p.y + pSize.h, at: performance.now() });
+    }
+  }
+
+  function drawAirPuffs(now) {
+    while (airPuffs.length && now - airPuffs[0].at > 400) airPuffs.shift();
+    for (const a of airPuffs) {
+      const k = (now - a.at) / 400;
+      ctx.strokeStyle = `rgba(255, 255, 255, ${0.8 * (1 - k)})`;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.ellipse(a.x, a.y + k * 10, 10 + k * 22, 3 + k * 5, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.fillStyle = `rgba(255, 255, 255, ${0.9 * (1 - k)})`;
+      for (const dx of [-1, 1]) fillEllipse(ctx, a.x + dx * (8 + k * 18), a.y + 4 + k * 14, 3, 1.5);
+    }
+  }
+
   // ---- Sound effects driven by game state ----
-  const heard = { ho: null, fuseTick: 0, sp: 0, iv: 0, sl: 0, tc: null, dc: null, jc: null, g: null, count: null, tick: null, phase: null };
+  const heard = { ho: null, fuseTick: 0, sp: 0, iv: 0, dj: 0, sl: 0, tc: null, ac: null, dc: null, jc: null, g: null, count: null, tick: null, phase: null };
 
   function detectSounds(state) {
     const me = state.players.find((p) => p.id === myId);
     if (me) {
       if (heard.dc !== null && me.dc !== heard.dc) Music.sfx(me.dm === 2 ? 'airdash' : 'slide');
-      if (heard.jc !== null && me.jc !== heard.jc) Music.sfx('jump');
+      if (heard.ac !== null && me.ac !== heard.ac) Music.sfx('flap');
+      else if (heard.jc !== null && me.jc !== heard.jc) Music.sfx('jump');
       else if (heard.g === 0 && me.g === 1 && me.dm !== 1) Music.sfx('land');
       if (heard.tc !== null && me.tc !== heard.tc) Music.sfx('splat');
-      const wornOff = (heard.sp > 0 && me.sp === 0) || (heard.iv > 0 && me.iv === 0) || (heard.sl > 0 && me.sl === 0);
+      const wornOff = (heard.sp > 0 && me.sp === 0) || (heard.iv > 0 && me.iv === 0) || (heard.dj > 0 && me.dj === 0) || (heard.sl > 0 && me.sl === 0);
       if (wornOff && state.phase === 'playing') Music.sfx('powerdown');
       heard.sp = me.sp;
       heard.iv = me.iv;
+      heard.dj = me.dj;
+      heard.ac = me.ac;
       heard.sl = me.sl;
       heard.tc = me.tc;
       heard.dc = me.dc;
       heard.jc = me.jc;
       heard.g = me.g;
     } else {
-      heard.jc = heard.g = heard.dc = heard.tc = null;
+      heard.jc = heard.g = heard.dc = heard.tc = heard.ac = null;
     }
 
     // 3-2-1 beeps, then GO!
@@ -1148,10 +1197,10 @@
       ctx.fillText(`${potato ? '🥔' : 'IT:'} ${who}`, 50, 38, 124);
     }
 
-    // Your power-up countdowns (speed boots, invisibility)
+    // Your power-up countdowns (speed boots, invisibility, wings)
     const me = state.players.find((p) => p.id === myId);
     if (me && state.phase === 'playing') {
-      const active = [[drawBoot, me.sp], [drawGhost, me.iv], [drawSnail, me.sl]].filter(([, secs]) => secs > 0);
+      const active = [[drawBoot, me.sp], [drawGhost, me.iv], [drawWing, me.dj], [drawSnail, me.sl]].filter(([, secs]) => secs > 0);
       active.forEach(([icon, secs], i) => {
         const y = 58 + i * 36;
         ctx.fillStyle = 'rgba(20, 26, 44, 0.8)';
@@ -1188,6 +1237,7 @@
       detectSounds(state);
       detectPadLaunches(state);
       detectTrapSplashes(state);
+      detectAirJumps(state);
       updateCamera(state, dt);
     }
 
@@ -1206,6 +1256,7 @@
     if (state?.pu) drawPowerupPickup(ctx, state.pu, time);
     drawPortalsThemed(ctx, map.portals, time, Math.max(0, (portalFlashUntil - now) / 400));
     if (state) drawPlayers(state, time);
+    drawAirPuffs(now);
     drawBooms(now);
     ctx.restore();
 

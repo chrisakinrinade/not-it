@@ -414,10 +414,11 @@ const AIRDASH_SECONDS = 0.18;
 const AIRDASH_SPEED = 720;
 
 // Power-ups: one on the map at a time, at a random spot from the map's powerupSpots,
-// randomly either speed boots (run faster) or an invisibility cloak.
+// randomly speed boots (run faster), an invisibility cloak or wings (double jump).
 const BOOTS_SECONDS = 6;
 const CLOAK_SECONDS = 5; // invisibility cloak: others only see a faint shimmer
-const POWERUP_KINDS = ['boots', 'cloak'];
+const WINGS_SECONDS = 8; // wings: one extra jump in mid-air, recharged on landing
+const POWERUP_KINDS = ['boots', 'cloak', 'wings'];
 const BOOTS_SPEED_MULT = 1.5;
 const POWERUP_FIRST_DELAY = 5; // seconds into the round before the first one appears
 const POWERUP_RESPAWN = 8; // seconds after a pickup before the next one appears
@@ -563,6 +564,8 @@ function snapshot() {
       sl: Math.max(0, Math.round((p.slowUntil - t) * 10) / 10), // slowed by a trap, time left (s)
       tc: p.trapHits, // trap counter, lets clients splash + play a sound
       iv: Math.max(0, Math.round((p.cloakUntil - t) * 10) / 10), // invisibility time left (s)
+      dj: Math.max(0, Math.round((p.wingsUntil - t) * 10) / 10), // wings (double jump) time left (s)
+      ac: p.airJumps, // mid-air jump counter, lets clients puff + play a flap
       dm: p.dashMode === 'slide' ? 1 : p.dashMode === 'air' ? 2 : 0,
       dc: p.dashes,
       cd: Math.max(0, Math.round((p.dashReadyAt - t) * 20) / 20), // dash cooldown left (s)
@@ -600,6 +603,9 @@ function resetBody(p, spawnX) {
   p.boosts = p.boosts ?? 0; // counter so clients can animate the pad + play a sound
   p.speedUntil = 0; // speed boots active until this time
   p.cloakUntil = 0; // invisible until this time
+  p.wingsUntil = 0; // can double jump until this time
+  p.airJumpUsed = false; // already used the mid-air jump since leaving the ground
+  p.airJumps = p.airJumps ?? 0;
   p.slowUntil = 0; // slowed by a trap until this time
   p.inTrap = false;
   p.trapHits = p.trapHits ?? 0;
@@ -684,6 +690,7 @@ function updatePowerup(active, t) {
     const cy = Math.max(p.y, Math.min(powerup.y, p.y + PLAYER_H));
     if (Math.hypot(powerup.x - cx, powerup.y - cy) > POWERUP_R) continue;
     if (powerup.kind === 'boots') p.speedUntil = t + BOOTS_SECONDS;
+    else if (powerup.kind === 'wings') p.wingsUntil = t + WINGS_SECONDS;
     else p.cloakUntil = t + CLOAK_SECONDS;
     broadcast({ t: 'powerup', id: p.id, kind: powerup.kind });
     powerup = null;
@@ -889,7 +896,17 @@ function stepPlayer(p, t) {
     p.jumpBuffer = 0;
     p.coyote = 0;
     p.onGround = false;
+  } else if (jumpPressed && t < p.wingsUntil && !p.airJumpUsed && !p.onGround) {
+    // Wings: a fresh jump in mid-air (also cancels an air dash or pad launch)
+    p.vy = -JUMP_VELOCITY;
+    p.airJumpUsed = true;
+    p.jumps = (p.jumps ?? 0) + 1;
+    p.airJumps++;
+    p.dashMode = null;
+    p.boosted = false;
+    p.jumpBuffer = 0;
   }
+  if (p.onGround) p.airJumpUsed = false;
   if (p.boosted && p.vy >= 0) p.boosted = false;
   if (!input.jump && !p.boosted && p.vy < -JUMP_VELOCITY * JUMP_CUT) {
     p.vy = -JUMP_VELOCITY * JUMP_CUT;
