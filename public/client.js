@@ -35,6 +35,12 @@
   const booms = []; // hot potato explosions: { x, y, at }
   let shakeUntil = 0;
   let goUntil = 0;
+  // Free roam: sessions run alongside the main game. The lobby's Free roam button is a
+  // local view (it doesn't change the main game's mode) listing them to join or start.
+  let roamSessions = []; // [{ id, mapId, players: [{ name, char }] }]
+  let roamView = false;
+  let roamMapId = null; // map picked for a new session
+  let rejoinMain = false; // was in the main game before free roam: rejoin it on the way out
 
   const savedName = () => {
     try { return localStorage.getItem('tagName') || ''; } catch { return ''; }
@@ -84,6 +90,15 @@
         if (wantJoin) send({ t: 'join', name: savedName() });
         break;
       case 'room':
+        if (m.roomId !== room.roomId) {
+          // Switched between the main game and a free roam session: start the view afresh
+          snaps.length = 0;
+          booms.length = 0;
+          cam.ready = false;
+          freeCam = false;
+          if (!m.free && rejoinMain && m.phase === 'lobby') send({ t: 'join', name: savedName() });
+          if (!m.free) rejoinMain = false;
+        }
         if (m.phase === 'ready' && room.phase !== 'ready') {
           cam.ready = false; // players respawned: snap camera
           freeCam = false;
@@ -92,6 +107,10 @@
         joined = room.players.some((p) => p.id === myId);
         if (room.phase === 'lobby') snaps.length = 0;
         renderUI();
+        break;
+      case 'roam':
+        roamSessions = m.sessions;
+        if (!$('#lobby').hidden) renderUI();
         break;
       case 'snap': {
         const d = performance.now() - m.st;
@@ -135,7 +154,7 @@
       case 'error':
         $('#lobbyError').textContent = m.msg;
         $('#lobbyError').hidden = false;
-        wantJoin = false;
+        if (!joined) wantJoin = false;
         break;
     }
   }
@@ -224,31 +243,39 @@
       li.append(info);
       list.append(li);
     }
-    list.hidden = room.players.length === 0;
+    list.hidden = room.players.length === 0 || roamView;
 
     const potato = room.mode === 'potato';
-    $('#lobbySub').innerHTML = potato
-      ? "Don't be holding the <strong>potato</strong> when it blows. Last one standing wins!"
-      : 'Whoever is <strong>IT</strong> when the clock runs out loses.';
+    $('#lobbySub').innerHTML = roamView
+      ? 'Explore any map with <strong>no clock</strong> and nobody IT. Start a session or join one.'
+      : potato
+        ? "Don't be holding the <strong>potato</strong> when it blows. Last one standing wins!"
+        : 'Whoever is <strong>IT</strong> when the clock runs out loses.';
     renderModeOptions();
     renderRoundOptions();
     renderFuse();
-    $('.round-length').hidden = potato;
-    $('.fuse-length').hidden = !potato;
+    $('.round-length').hidden = potato || roamView;
+    $('.fuse-length').hidden = !potato || roamView;
     renderMapOptions();
+    renderRoam();
 
     const count = room.players.length;
     const full = count >= maxPlayers;
     $('#joinForm').hidden = joined;
+    $('#joinBtn').hidden = roamView;
     $('#joinBtn').disabled = full;
-    $('#nameInput').disabled = full;
-    $('#leaveBtn').hidden = !joined;
-    $('#startBtn').hidden = !joined || room.phase !== 'lobby';
+    $('#nameInput').disabled = full && !roamView;
+    $('#leaveBtn').hidden = !joined || roamView;
+    $('#startBtn').hidden = !joined || room.phase !== 'lobby' || roamView;
     $('#startBtn').disabled = count < 2;
-    if (joined) $('#lobbyError').hidden = true;
+    $('#roamNewBtn').hidden = !roamView;
+    if (joined && !roamView) $('#lobbyError').hidden = true;
 
     let status;
-    if (room.phase !== 'lobby' && !joined) {
+    if (roamView) {
+      const n = roamSessions.length;
+      status = n ? `${n} free roam session${n === 1 ? '' : 's'} running.` : 'No free roam sessions yet. Start one!';
+    } else if (room.phase !== 'lobby' && !joined) {
       status = full ? 'A round is in progress and the game is full.' : 'A round is in progress — join now to play in the next one.';
     } else if (full && !joined) status = 'Game is full.';
     else if (count < 2) status = 'Waiting for at least 2 players…';
@@ -304,6 +331,7 @@
     }
     renderResults();
 
+    $('#roamLeaveBtn').hidden = !(inGame && room.free);
     $('#touch').hidden = !(isTouch && inGame && !ended && !watching);
     if (!inGame || ended) clearInputs();
 
@@ -378,7 +406,7 @@
     box.append(table);
   }
 
-  const MODES = [['classic', 'Classic tag'], ['potato', 'Hot potato 🥔']];
+  const MODES = [['classic', 'Classic tag'], ['potato', 'Hot potato 🥔'], ['free', 'Free roam 🌿']];
 
   function renderModeOptions() {
     const box = $('#modeOptions');
@@ -388,13 +416,78 @@
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.setAttribute('role', 'radio');
-      btn.setAttribute('aria-checked', String(id === (room.mode || 'classic')));
+      btn.setAttribute('aria-checked', String(roamView ? id === 'free' : id === (room.mode || 'classic')));
       btn.textContent = label;
-      btn.disabled = !canEdit;
-      btn.addEventListener('click', () => send({ t: 'mode', mode: id }));
+      // Free roam is always open; from it, anyone can switch back to see the main game
+      btn.disabled = id !== 'free' && !canEdit && !roamView;
+      btn.addEventListener('click', () => {
+        if (id === 'free') {
+          roamView = true;
+          roamMapId ??= room.mapId;
+        } else {
+          roamView = false;
+          if (canEdit) send({ t: 'mode', mode: id });
+        }
+        $('#lobbyError').hidden = true;
+        renderUI();
+      });
       box.append(btn);
     }
-    $('#modeLabel').textContent = canEdit ? 'Game mode' : 'Game mode (join to change)';
+    $('#modeLabel').textContent = canEdit || roamView ? 'Game mode' : 'Game mode (join to change)';
+  }
+
+  // Free roam sessions in the lobby: who's in each one, with a Join button
+  function renderRoam() {
+    $('#roamPanel').hidden = !roamView;
+    if (!roamView) return;
+    const list = $('#roamList');
+    list.replaceChildren();
+    if (!roamSessions.length) {
+      const li = document.createElement('li');
+      li.className = 'empty';
+      li.textContent = 'Nobody is free roaming right now.';
+      list.append(li);
+    }
+    for (const s of roamSessions) {
+      const li = document.createElement('li');
+      const faces = document.createElement('div');
+      faces.className = 'faces';
+      for (const p of s.players.slice(0, 4)) faces.append(iconCanvas(p.char, 32));
+      const info = document.createElement('div');
+      info.className = 'info';
+      const name = document.createElement('div');
+      name.className = 'rname';
+      name.textContent = `${maps[s.mapId]?.name ?? s.mapId} · ${s.players.length}/${maxPlayers}`;
+      const who = document.createElement('span');
+      who.className = 'who';
+      who.textContent = s.players.map((p) => p.name).join(', ');
+      info.append(name, who);
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.textContent = 'Join';
+      btn.disabled = s.players.length >= maxPlayers;
+      btn.addEventListener('click', (e) => {
+        e.currentTarget.blur();
+        enterRoam({ t: 'roamJoin', id: s.id });
+      });
+      li.append(faces, info, btn);
+      list.append(li);
+    }
+  }
+
+  // Start or join a free roam session, using your name (the box, or the one you joined with)
+  function enterRoam(msg) {
+    const name = joined ? playerInfo(myId)?.name : $('#nameInput').value.trim();
+    if (!name) {
+      $('#lobbyError').textContent = 'Enter your name first.';
+      $('#lobbyError').hidden = false;
+      $('#nameInput').focus();
+      return;
+    }
+    if (!joined) saveName(name);
+    $('#lobbyError').hidden = true;
+    rejoinMain = joined;
+    send({ ...msg, name });
   }
 
   // The fuse stepper is static markup (rebuilding it would break press-and-hold)
@@ -448,14 +541,15 @@
 
   function renderMapOptions() {
     const box = $('#mapOptions');
-    const canEdit = joined && room.phase === 'lobby';
+    const canEdit = roamView || (joined && room.phase === 'lobby'); // free roam: picks the map for a new session
+    const selected = roamView ? roamMapId : room.mapId;
     box.replaceChildren();
     for (const [id, map] of Object.entries(maps)) {
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'map-card';
       btn.setAttribute('role', 'radio');
-      btn.setAttribute('aria-checked', String(id === room.mapId));
+      btn.setAttribute('aria-checked', String(id === selected));
       btn.disabled = !canEdit;
       const thumb = document.createElement('canvas');
       const dpr = window.devicePixelRatio || 1;
@@ -473,16 +567,21 @@
         btn.append(big);
       }
       btn.append(thumb, label);
-      btn.addEventListener('click', () => send({ t: 'map', id }));
+      btn.addEventListener('click', () => {
+        if (!roamView) return send({ t: 'map', id });
+        roamMapId = id;
+        renderMapOptions();
+      });
       box.append(btn);
     }
-    $('#mapLabel').textContent = canEdit ? 'Map' : 'Map (join to change)';
+    $('#mapLabel').textContent = roamView ? 'Map for a new session' : canEdit ? 'Map' : 'Map (join to change)';
   }
 
   $('#nameInput').value = savedName();
 
   $('#joinForm').addEventListener('submit', (e) => {
     e.preventDefault();
+    if (roamView) return $('#nameInput').blur(); // free roam has its own Start / Join buttons
     const name = $('#nameInput').value.trim();
     if (!name) {
       $('#nameInput').focus();
@@ -507,6 +606,8 @@
   });
   onClick('#restartBtn', () => send({ t: 'restart' }));
   onClick('#lobbyBtn', () => send({ t: 'lobby' }));
+  onClick('#roamNewBtn', () => enterRoam({ t: 'roamNew', mapId: roamMapId }));
+  onClick('#roamLeaveBtn', () => send({ t: 'roamLeave' }));
 
   // ---------------------------------------------------------------------------
   // Input: keyboard + touch
@@ -920,7 +1021,7 @@
           heard.fuseTick = now + clamp(0.1 + left * 0.04, 0.1, 0.7);
         }
       }
-    } else if (state.phase === 'playing' && state.timeLeft <= 5) {
+    } else if (state.phase === 'playing' && !room.free && state.timeLeft <= 5) {
       // Clock ticks for the final 5 seconds (louder on the last one)
       const secs = Math.ceil(state.timeLeft);
       if (secs !== heard.tick && secs >= 1) Music.sfx('tick', secs === 1 ? 1.8 : 1);
@@ -1079,6 +1180,21 @@
     const cx = view.width / 2;
     const potato = room.mode === 'potato';
 
+    if (room.free) {
+      // No clock and nobody IT: just say who's here
+      const label = `🌿 Free roam · ${state.players.length} ${state.players.length === 1 ? 'player' : 'players'}`;
+      ctx.font = '800 16px ui-rounded, system-ui, sans-serif';
+      const w = ctx.measureText(label).width + 32;
+      ctx.fillStyle = 'rgba(20, 26, 44, 0.8)';
+      roundRectPath(ctx, cx - w / 2, 14, w, 36, 18);
+      ctx.fill();
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = '#fff';
+      ctx.fillText(label, cx, 33);
+      ctx.textBaseline = 'alphabetic';
+    }
+
     if (state.phase === 'ready') {
       ctx.fillStyle = 'rgba(15, 20, 36, 0.35)';
       ctx.fillRect(0, 0, view.width, view.height);
@@ -1097,7 +1213,18 @@
       drawLabel(`${who} got the potato — scatter!`, cx, 295, '#ffe066', 24);
     }
 
-    // Timer pill (hot potato: the fuse)
+    if (!room.free) drawRoundHud(state, time);
+    drawPowerupTimers(state, time);
+
+    if (performance.now() < goUntil) {
+      drawLabel('GO!', cx, 280, '#ffe066', 90);
+    }
+  }
+
+  // Timer pill (hot potato: the fuse) and who's IT
+  function drawRoundHud(state, time) {
+    const cx = view.width / 2;
+    const potato = room.mode === 'potato';
     const secs = Math.ceil(potato ? fuseLeft(state) : state.timeLeft);
     const label = potato ? `${secs}s` : `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`;
     const urgent = state.phase === 'playing' && (potato ? secs <= 3 && !state.ho : secs <= 10);
@@ -1147,8 +1274,10 @@
       const who = state.itId === myId ? 'YOU' : it.name;
       ctx.fillText(`${potato ? '🥔' : 'IT:'} ${who}`, 50, 38, 124);
     }
+  }
 
-    // Your power-up countdowns (speed boots, invisibility)
+  // Your power-up countdowns (speed boots, invisibility)
+  function drawPowerupTimers(state, time) {
     const me = state.players.find((p) => p.id === myId);
     if (me && state.phase === 'playing') {
       const active = [[drawBoot, me.sp], [drawGhost, me.iv], [drawSnail, me.sl]].filter(([, secs]) => secs > 0);
@@ -1163,10 +1292,6 @@
         ctx.fillStyle = secs <= 1.5 && Math.floor(time * 6) % 2 ? '#ff8787' : '#ffe066';
         ctx.fillText(`${Math.ceil(secs)}s`, 54, y + 20);
       });
-    }
-
-    if (performance.now() < goUntil) {
-      drawLabel('GO!', cx, 280, '#ffe066', 90);
     }
   }
 
@@ -1211,7 +1336,7 @@
 
     if (state) {
       const urgent = room.mode === 'potato' ? !state.ho && fuseLeft(state) <= 5 : state.timeLeft <= 10;
-      Music.setUrgent(state.phase === 'playing' && urgent);
+      Music.setUrgent(state.phase === 'playing' && !room.free && urgent);
       drawOffscreenArrows(state, time);
       updateDashMeter(state);
       drawHud(state, time);

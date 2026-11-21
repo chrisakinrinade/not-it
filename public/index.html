@@ -28,6 +28,11 @@
         <div id="modeOptions" class="segmented" role="radiogroup" aria-labelledby="modeLabel"></div>
       </div>
 
+      <div id="roamPanel" class="roam-panel" hidden>
+        <span class="round-label">Free roam sessions</span>
+        <ul id="roamList"></ul>
+      </div>
+
       <div class="map-picker">
         <span class="round-label" id="mapLabel">Map</span>
         <div id="mapOptions" class="map-options" role="radiogroup" aria-labelledby="mapLabel"></div>
@@ -53,6 +58,7 @@
 
       <div class="row">
         <button id="startBtn" hidden>Start game</button>
+        <button id="roamNewBtn" type="button" hidden>Start free roam</button>
         <button id="leaveBtn" class="secondary" hidden>Leave</button>
       </div>
 
@@ -68,6 +74,7 @@
     <canvas id="canvas"></canvas>
     <div id="banner" hidden><span id="bannerText"></span><button id="followBtn" type="button" hidden>Follow IT</button></div>
     <div id="toast"></div>
+    <button id="roamLeaveBtn" type="button" hidden>Leave free roam</button>
 
     <div id="endOverlay" hidden>
       <div class="card">
