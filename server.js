@@ -344,22 +344,18 @@ const MAPS = {
   },
 };
 for (const map of Object.values(MAPS)) map.world ??= WORLD;
-let mapId = 'meadow';
-const currentMap = () => MAPS[mapId];
-const currentWorld = () => currentMap().world;
+const mapOf = (r) => MAPS[r.mapId];
+const worldOf = (r) => mapOf(r).world;
 
-// Live platform positions for the current map (moving ones change every tick)
-let livePlatforms = [];
-let liveMapId = null;
-
-function updatePlatforms(t) {
-  const defs = currentMap().platforms;
-  if (liveMapId !== mapId) {
-    livePlatforms = defs.map((d) => ({ ...d, prevX: d.x, prevY: d.y, dx: 0, dy: 0 }));
-    liveMapId = mapId;
+// Live platform positions for a room's map (moving ones change every tick)
+function updatePlatforms(r, t) {
+  const defs = mapOf(r).platforms;
+  if (r.liveMapId !== r.mapId) {
+    r.livePlatforms = defs.map((d) => ({ ...d, prevX: d.x, prevY: d.y, dx: 0, dy: 0 }));
+    r.liveMapId = r.mapId;
   }
   defs.forEach((d, i) => {
-    const pl = livePlatforms[i];
+    const pl = r.livePlatforms[i];
     pl.prevX = pl.x;
     pl.prevY = pl.y;
     if (d.move) {
@@ -387,19 +383,18 @@ const COYOTE_TIME = 0.08; // can still jump just after walking off a ledge
 const JUMP_BUFFER = 0.1; // jump pressed just before landing still counts
 const TAG_INSET = 3; // shrink hitboxes slightly so tags feel fair
 
-const MAX_PLAYERS = 8;
+const MAX_PLAYERS = 8; // per room, including each free roam session
 const CHARACTER_COUNT = 10; // must match CHARACTERS in public/characters.js
 const ROUND_OPTIONS = [30, 60, 90, 120, 180]; // choices offered in the lobby
-let roundSeconds = Number(process.env.ROUND_SECONDS) || 60;
+const START_ROUND_SECONDS = Number(process.env.ROUND_SECONDS) || 60;
 const READY_SECONDS = 3;
 const FREEZE_SECONDS = 1; // newly-tagged player can't move
-// Game modes: classic tag (IT when the clock runs out loses) or hot potato
+// Game modes for the main game: classic tag (IT when the clock runs out loses) or hot potato
 // (holding the potato when its fuse runs out knocks you out; last one standing wins).
+// Free roam isn't one of these: it runs in its own sessions, alongside the main game.
 const MODES = ['classic', 'potato'];
-let mode = 'classic';
 const FUSE_MIN = 5;
 const FUSE_MAX = 30;
-let fuseSeconds = 15; // set in the lobby; the fuse resets to this on every tag
 const HANDOFF_SECONDS = 3; // after a boom, the new holder is frozen this long so everyone can scatter
 const IMMUNE_SECONDS = 2; // tagger can't be tagged straight back
 
@@ -472,59 +467,83 @@ const server = http.createServer((req, res) => {
 // ---------------------------------------------------------------------------
 // Game state
 // ---------------------------------------------------------------------------
+// There's one main game (classic / hot potato, settings chosen in the lobby) plus any
+// number of free roam sessions: no clock, nobody IT, anyone can drop in and out, and a
+// session ends when its last player leaves. Every socket views exactly one room
+// (`ws.room`): the main game by default, or the free roam session it's playing in.
 const clients = new Set(); // every open socket, joined or not
-const players = new Map(); // id -> player (joined sockets only)
 // Session win counts, keyed by name so a phone that drops and rejoins keeps its record.
 // Reset when the server restarts.
 const wins = new Map(); // name -> wins
-let lastResults = null; // per-player stats for the round that just ended
-let powerup = null; // { x, y, kind } while one is on the map
-let powerupSpotIndex = -1;
-let nextPowerupAt = Infinity;
 let nextId = 1;
+let nextRoamId = 1;
 
-let phase = 'lobby'; // lobby | ready | playing | ended
-let itId = null;
-let loserId = null;
-let loserName = null;
-let winnerId = null; // hot potato: last one standing
-let winnerName = null;
-let phaseEndsAt = 0; // end of the round (classic) or when the potato blows (hot potato)
-let handoffUntil = 0; // hot potato: new holder frozen after a boom
-let outCount = 0; // hot potato: how many have been knocked out this round
+function createRoom({ id, free = false, mapId = 'meadow' }) {
+  return {
+    id,
+    free,
+    players: new Map(), // id -> player (joined sockets only)
+    phase: free ? 'playing' : 'lobby', // lobby | ready | playing | ended (free roam is always playing)
+    mode: free ? 'free' : 'classic',
+    roundSeconds: START_ROUND_SECONDS,
+    fuseSeconds: 15, // set in the lobby; the fuse resets to this on every tag
+    mapId,
+    itId: null,
+    loserId: null,
+    loserName: null,
+    winnerId: null, // hot potato: last one standing
+    winnerName: null,
+    phaseEndsAt: 0, // end of the round (classic) or when the potato blows (hot potato)
+    handoffUntil: 0, // hot potato: new holder frozen after a boom
+    outCount: 0, // hot potato: how many have been knocked out this round
+    lastResults: null, // per-player stats for the round that just ended
+    powerup: null, // { x, y, kind } while one is on the map
+    powerupSpotIndex: -1,
+    nextPowerupAt: free ? nowSec() + POWERUP_FIRST_DELAY : Infinity,
+    livePlatforms: [],
+    liveMapId: null,
+  };
+}
 
 const nowSec = () => performance.now() / 1000;
 const NO_INPUT = { left: false, right: false, jump: false, dash: false };
+
+const mainRoom = createRoom({ id: 0 });
+const roamRooms = new Map(); // id -> free roam room
+const allRooms = () => [mainRoom, ...roamRooms.values()];
 
 function send(ws, msg) {
   if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(msg));
 }
 
-function broadcast(msg) {
+// Send to every socket viewing room `r`
+function broadcast(r, msg) {
   const data = JSON.stringify(msg);
-  for (const ws of clients) if (ws.readyState === ws.OPEN) ws.send(data);
+  for (const ws of clients) if (ws.room === r && ws.readyState === ws.OPEN) ws.send(data);
 }
 
-function activePlayers() {
-  return [...players.values()].filter((p) => !p.waiting && !p.out);
+function activePlayers(r) {
+  return [...r.players.values()].filter((p) => !p.waiting && !p.out);
 }
 
-function roomMessage() {
+function roomMessage(r) {
   return {
     t: 'room',
-    phase,
-    roundSeconds,
-    mode,
-    fuseSeconds,
+    roomId: r.id,
+    free: r.free,
+    phase: r.phase,
+    roundSeconds: r.roundSeconds,
+    mode: r.mode,
+    fuseSeconds: r.fuseSeconds,
     fuseRange: [FUSE_MIN, FUSE_MAX],
-    mapId,
-    itId,
-    loserId,
-    loserName,
-    winnerId,
-    winnerName,
-    results: phase === 'ended' ? lastResults : null,
-    players: [...players.values()].map((p) => ({
+    mapId: r.mapId,
+    itId: r.itId,
+    loserId: r.loserId,
+    loserName: r.loserName,
+    winnerId: r.winnerId,
+    winnerName: r.winnerName,
+    results: r.phase === 'ended' ? r.lastResults : null,
+    players: [...r.players.values()].map((p) => ({
       id: p.id,
       name: p.name,
       char: p.char,
@@ -535,23 +554,40 @@ function roomMessage() {
   };
 }
 
-function broadcastRoom() {
-  broadcast(roomMessage());
+function broadcastRoom(r) {
+  broadcast(r, roomMessage(r));
 }
 
-function snapshot() {
+// The free roam sessions anyone can join, for the lobby's list (sent to every socket)
+function roamMessage() {
+  return {
+    t: 'roam',
+    sessions: [...roamRooms.values()].map((r) => ({
+      id: r.id,
+      mapId: r.mapId,
+      players: [...r.players.values()].map((p) => ({ name: p.name, char: p.char })),
+    })),
+  };
+}
+
+function broadcastRoam() {
+  const data = JSON.stringify(roamMessage());
+  for (const ws of clients) if (ws.readyState === ws.OPEN) ws.send(data);
+}
+
+function snapshot(r) {
   const t = nowSec();
   return {
     t: 'snap',
     st: performance.now(),
-    phase,
-    timeLeft: phase === 'ended' ? 0 : Math.max(0, phaseEndsAt - t),
-    itId,
-    ho: Math.max(0, Math.round((handoffUntil - t) * 10) / 10), // hot potato hand-off countdown (s)
+    phase: r.phase,
+    timeLeft: r.phase === 'ended' || r.free ? 0 : Math.max(0, r.phaseEndsAt - t),
+    itId: r.itId,
+    ho: Math.max(0, Math.round((r.handoffUntil - t) * 10) / 10), // hot potato hand-off countdown (s)
     // [index, x, y] for each moving platform
-    pu: powerup, // { x, y, kind } or null
-    mp: livePlatforms.flatMap((pl, i) => (pl.move ? [[i, Math.round(pl.x * 10) / 10, Math.round(pl.y * 10) / 10]] : [])),
-    players: activePlayers().map((p) => ({
+    pu: r.powerup, // { x, y, kind } or null
+    mp: r.livePlatforms.flatMap((pl, i) => (pl.move ? [[i, Math.round(pl.x * 10) / 10, Math.round(pl.y * 10) / 10]] : [])),
+    players: activePlayers(r).map((p) => ({
       id: p.id,
       x: Math.round(p.x * 10) / 10,
       y: Math.round(p.y * 10) / 10,
@@ -587,13 +623,13 @@ function pickRandom(arr) {
   return arr[Math.floor(Math.random() * arr.length)];
 }
 
-function resetBody(p, spawnX) {
+function resetBody(r, p, spawnX) {
   p.x = spawnX;
-  p.y = currentMap().platforms[0].y - PLAYER_H;
+  p.y = mapOf(r).platforms[0].y - PLAYER_H;
   p.vx = 0;
   p.vy = 0;
   p.onGround = true;
-  p.facing = spawnX < currentWorld().width / 2 ? 1 : -1;
+  p.facing = spawnX < worldOf(r).width / 2 ? 1 : -1;
   p.coyote = 0;
   p.jumpBuffer = 0;
   p.jumpWasDown = true; // holding jump through the countdown shouldn't auto-jump
@@ -617,9 +653,9 @@ function resetBody(p, spawnX) {
   p.teleports = p.teleports ?? 0; // bumps on every teleport so clients skip interpolating the jump
 }
 
-function checkPads(p) {
+function checkPads(r, p) {
   if (!p.onGround) return;
-  for (const pad of currentMap().pads || []) {
+  for (const pad of mapOf(r).pads || []) {
     const onTop = Math.abs(p.y + PLAYER_H - pad.y) < 1;
     const overlapsX = p.x + PLAYER_W > pad.x + 6 && p.x < pad.x + pad.w - 6;
     if (!onTop || !overlapsX) continue;
@@ -636,10 +672,10 @@ function checkPads(p) {
 }
 
 // Standing in a trap keeps you slowed; the slow wears off SLOW_SECONDS after you leave it
-function checkTraps(p, t) {
+function checkTraps(r, p, t) {
   let inTrap = false;
   if (p.onGround) {
-    for (const trap of currentMap().traps || []) {
+    for (const trap of mapOf(r).traps || []) {
       const onTop = Math.abs(p.y + PLAYER_H - trap.y) < 1;
       const overlapsX = p.x + PLAYER_W > trap.x + 6 && p.x < trap.x + trap.w - 6;
       if (onTop && overlapsX) inTrap = true;
@@ -656,8 +692,8 @@ function distToPortal(p, portal) {
   return Math.hypot(p.x + PLAYER_W / 2 - portal.x, p.y + PLAYER_H / 2 - portal.y);
 }
 
-function checkPortals(p) {
-  const PORTALS = currentMap().portals;
+function checkPortals(r, p) {
+  const PORTALS = mapOf(r).portals;
   if (p.portalLock >= 0 && distToPortal(p, PORTALS[p.portalLock]) > PORTALS[p.portalLock].r + PORTAL_REARM_DIST) {
     p.portalLock = -1;
   }
@@ -665,7 +701,7 @@ function checkPortals(p) {
     if (i === p.portalLock || distToPortal(p, PORTALS[i]) >= PORTALS[i].r) continue;
     const exitIndex = i ^ 1;
     const exit = PORTALS[exitIndex];
-    p.x = Math.max(0, Math.min(currentWorld().width - PLAYER_W, exit.x - PLAYER_W / 2));
+    p.x = Math.max(0, Math.min(worldOf(r).width - PLAYER_W, exit.x - PLAYER_W / 2));
     p.y = exit.y - PLAYER_H / 2;
     p.onGround = false;
     p.portalLock = exitIndex;
@@ -674,173 +710,223 @@ function checkPortals(p) {
   }
 }
 
-function updatePowerup(active, t) {
-  const spots = currentMap().powerupSpots || [];
-  if (!powerup && t >= nextPowerupAt && spots.length) {
+function updatePowerup(r, active, t) {
+  const spots = mapOf(r).powerupSpots || [];
+  if (!r.powerup && t >= r.nextPowerupAt && spots.length) {
     // Pick a different spot from last time
     let i = Math.floor(Math.random() * spots.length);
-    if (spots.length > 1 && i === powerupSpotIndex) i = (i + 1) % spots.length;
-    powerupSpotIndex = i;
+    if (spots.length > 1 && i === r.powerupSpotIndex) i = (i + 1) % spots.length;
+    r.powerupSpotIndex = i;
     const [x, platformY] = spots[i];
-    powerup = { x, y: platformY - 22, kind: pickRandom(POWERUP_KINDS) };
+    r.powerup = { x, y: platformY - 22, kind: pickRandom(POWERUP_KINDS) };
   }
-  if (!powerup) return;
+  if (!r.powerup) return;
   for (const p of active) {
-    const cx = Math.max(p.x, Math.min(powerup.x, p.x + PLAYER_W)); // closest point on the player box
-    const cy = Math.max(p.y, Math.min(powerup.y, p.y + PLAYER_H));
-    if (Math.hypot(powerup.x - cx, powerup.y - cy) > POWERUP_R) continue;
-    if (powerup.kind === 'boots') p.speedUntil = t + BOOTS_SECONDS;
-    else if (powerup.kind === 'shield') p.shield = true;
+    const cx = Math.max(p.x, Math.min(r.powerup.x, p.x + PLAYER_W)); // closest point on the player box
+    const cy = Math.max(p.y, Math.min(r.powerup.y, p.y + PLAYER_H));
+    if (Math.hypot(r.powerup.x - cx, r.powerup.y - cy) > POWERUP_R) continue;
+    if (r.powerup.kind === 'boots') p.speedUntil = t + BOOTS_SECONDS;
+    else if (r.powerup.kind === 'shield') p.shield = true;
     else p.cloakUntil = t + CLOAK_SECONDS;
-    broadcast({ t: 'powerup', id: p.id, kind: powerup.kind });
-    powerup = null;
-    nextPowerupAt = t + POWERUP_RESPAWN;
+    broadcast(r, { t: 'powerup', id: p.id, kind: r.powerup.kind });
+    r.powerup = null;
+    r.nextPowerupAt = t + POWERUP_RESPAWN;
     return;
   }
 }
 
-function startRound() {
-  const list = [...players.values()];
+function startRound(r) {
+  const list = [...r.players.values()];
   if (list.length < 2) return false;
-  const spawns = shuffle(currentMap().spawns.slice());
+  const spawns = shuffle(mapOf(r).spawns.slice());
   list.forEach((p, i) => {
     p.waiting = false;
     p.out = false;
     p.outOrder = 0;
     p.itTime = 0;
     p.tags = 0;
-    resetBody(p, spawns[i]);
+    resetBody(r, p, spawns[i]);
   });
-  itId = pickRandom(list).id;
-  loserId = null;
-  loserName = null;
-  winnerId = null;
-  winnerName = null;
-  handoffUntil = 0;
-  outCount = 0;
-  phase = 'ready';
-  phaseEndsAt = nowSec() + READY_SECONDS;
-  powerup = null;
-  powerupSpotIndex = -1;
-  nextPowerupAt = phaseEndsAt + POWERUP_FIRST_DELAY;
-  updatePlatforms(nowSec()); // so the first snapshot has this map's platforms
-  broadcastRoom();
-  broadcast(snapshot());
+  r.itId = pickRandom(list).id;
+  r.loserId = null;
+  r.loserName = null;
+  r.winnerId = null;
+  r.winnerName = null;
+  r.handoffUntil = 0;
+  r.outCount = 0;
+  r.phase = 'ready';
+  r.phaseEndsAt = nowSec() + READY_SECONDS;
+  r.powerup = null;
+  r.powerupSpotIndex = -1;
+  r.nextPowerupAt = r.phaseEndsAt + POWERUP_FIRST_DELAY;
+  updatePlatforms(r, nowSec()); // so the first snapshot has this map's platforms
+  broadcastRoom(r);
+  broadcast(r, snapshot(r));
   return true;
 }
 
-function toLobby() {
-  phase = 'lobby';
-  itId = null;
-  loserId = null;
-  loserName = null;
-  winnerId = null;
-  winnerName = null;
-  for (const p of players.values()) {
+function toLobby(r) {
+  r.phase = 'lobby';
+  r.itId = null;
+  r.loserId = null;
+  r.loserName = null;
+  r.winnerId = null;
+  r.winnerName = null;
+  for (const p of r.players.values()) {
     p.waiting = false;
     p.out = false;
   }
-  broadcastRoom();
+  broadcastRoom(r);
 }
 
 // Classic: `loser` is whoever was IT. Hot potato: `winner` is the last one standing.
-function endRound({ loser = null, winner = null }) {
-  phase = 'ended';
-  const played = [...players.values()].filter((p) => !p.waiting);
-  if (mode === 'potato') {
-    winnerId = winner?.id ?? null;
-    winnerName = winner?.name ?? null;
+function endRound(r, { loser = null, winner = null }) {
+  r.phase = 'ended';
+  const played = [...r.players.values()].filter((p) => !p.waiting);
+  if (r.mode === 'potato') {
+    r.winnerId = winner?.id ?? null;
+    r.winnerName = winner?.name ?? null;
     if (winner) wins.set(winner.name, (wins.get(winner.name) ?? 0) + 1);
     // 1st = last one standing, then in reverse order of being knocked out
-    lastResults = played
+    r.lastResults = played
       .sort((a, b) => (b === winner) - (a === winner) || b.outOrder - a.outOrder)
       .map((p, i) => ({ id: p.id, name: p.name, char: p.char, place: i + 1, itTime: Math.round(p.itTime * 10) / 10, tags: p.tags }));
   } else {
-    loserId = loser?.id ?? null;
-    loserName = loser?.name ?? null;
+    r.loserId = loser?.id ?? null;
+    r.loserName = loser?.name ?? null;
     for (const p of played) if (p !== loser) wins.set(p.name, (wins.get(p.name) ?? 0) + 1);
-    lastResults = played
+    r.lastResults = played
       .map((p) => ({ id: p.id, name: p.name, char: p.char, itTime: Math.round(p.itTime * 10) / 10, tags: p.tags }))
-      .sort((a, b) => (a.id === loserId) - (b.id === loserId) || a.itTime - b.itTime);
+      .sort((a, b) => (a.id === r.loserId) - (b.id === r.loserId) || a.itTime - b.itTime);
   }
-  broadcast(snapshot());
-  broadcastRoom();
+  broadcast(r, snapshot(r));
+  broadcastRoom(r);
 }
 
 // Hot potato: give the potato to `next`, frozen briefly so everyone else can scatter
-function handOff(next, t) {
-  itId = next.id;
+function handOff(r, next, t) {
+  r.itId = next.id;
   next.frozenUntil = t + HANDOFF_SECONDS;
   next.immuneUntil = 0;
-  handoffUntil = t + HANDOFF_SECONDS;
-  phaseEndsAt = handoffUntil + fuseSeconds;
+  r.handoffUntil = t + HANDOFF_SECONDS;
+  r.phaseEndsAt = r.handoffUntil + r.fuseSeconds;
 }
 
 // Hot potato: the fuse ran out. The holder is out and the nearest survivor gets the potato.
-function explodePotato(t) {
-  const holder = players.get(itId);
+function explodePotato(r, t) {
+  const holder = r.players.get(r.itId);
   if (!holder) return;
   holder.out = true;
-  holder.outOrder = ++outCount;
-  const survivors = activePlayers();
+  holder.outOrder = ++r.outCount;
+  const survivors = activePlayers(r);
   const hx = holder.x + PLAYER_W / 2;
   const hy = holder.y + PLAYER_H / 2;
   const dist = (p) => Math.hypot(p.x + PLAYER_W / 2 - hx, p.y + PLAYER_H / 2 - hy);
   const next = survivors.length > 1 ? survivors.reduce((a, b) => (dist(b) < dist(a) ? b : a)) : null;
-  broadcast({ t: 'boom', id: holder.id, x: Math.round(hx), y: Math.round(hy), next: next?.id ?? null });
+  broadcast(r, { t: 'boom', id: holder.id, x: Math.round(hx), y: Math.round(hy), next: next?.id ?? null });
   if (!next) {
-    endRound({ winner: survivors[0] ?? null });
+    endRound(r, { winner: survivors[0] ?? null });
     return;
   }
-  handOff(next, t);
-  broadcastRoom();
+  handOff(r, next, t);
+  broadcastRoom(r);
 }
 
+// Main game: someone left (or disconnected)
 function removePlayer(id) {
-  const p = players.get(id);
+  const r = mainRoom;
+  const p = r.players.get(id);
   if (!p) return;
-  players.delete(id);
-  if (phase === 'ready' || phase === 'playing') {
-    const active = activePlayers();
+  r.players.delete(id);
+  if (r.players.size === 0) return toLobby(r); // nobody left, e.g. everyone went off to free roam from the results
+  if (r.phase === 'ready' || r.phase === 'playing') {
+    const active = activePlayers(r);
     if (active.length < 2) {
-      if (mode === 'potato' && active.length === 1 && outCount > 0) {
-        broadcast({ t: 'notice', msg: `${p.name} left — ${active[0].name} is the last one standing!` });
-        endRound({ winner: active[0] });
+      if (r.mode === 'potato' && active.length === 1 && r.outCount > 0) {
+        broadcast(r, { t: 'notice', msg: `${p.name} left — ${active[0].name} is the last one standing!` });
+        endRound(r, { winner: active[0] });
         return;
       }
-      broadcast({ t: 'notice', msg: `${p.name} left — not enough players.` });
-      toLobby();
+      broadcast(r, { t: 'notice', msg: `${p.name} left — not enough players.` });
+      toLobby(r);
       return;
     }
-    if (id === itId) {
+    if (id === r.itId) {
       const next = pickRandom(active);
-      if (mode === 'potato' && phase === 'playing') {
-        handOff(next, nowSec());
-        broadcast({ t: 'notice', msg: `${p.name} left — ${next.name} has the potato! 🥔` });
+      if (r.mode === 'potato' && r.phase === 'playing') {
+        handOff(r, next, nowSec());
+        broadcast(r, { t: 'notice', msg: `${p.name} left — ${next.name} has the potato! 🥔` });
       } else {
-        itId = next.id;
+        r.itId = next.id;
         next.frozenUntil = nowSec() + FREEZE_SECONDS;
-        broadcast({ t: 'notice', msg: `${p.name} left — ${next.name} is now IT!` });
+        broadcast(r, { t: 'notice', msg: `${p.name} left — ${next.name} is now IT!` });
       }
     }
   }
-  broadcastRoom();
+  broadcastRoom(r);
+}
+
+// ---------------------------------------------------------------------------
+// Free roam sessions
+// ---------------------------------------------------------------------------
+function cleanName(name) {
+  return String(name ?? '').replace(/\s+/g, ' ').trim().slice(0, 12) || 'Player';
+}
+
+// A character nobody else in the room is using
+function freeCharacter(r) {
+  const used = new Set([...r.players.values()].map((p) => p.char));
+  return pickRandom([...Array(CHARACTER_COUNT).keys()].filter((c) => !used.has(c)));
+}
+
+// Move a socket out of the main game (if it's in it) and into free roam session `r`
+function enterRoam(ws, r, name) {
+  removePlayer(ws.id);
+  const p = { id: ws.id, name: cleanName(name), char: freeCharacter(r), waiting: false, input: { ...NO_INPUT } };
+  // Drop in at a spawn point nobody's standing on, if there is one
+  const groundY = mapOf(r).platforms[0].y - PLAYER_H;
+  const others = [...r.players.values()];
+  const clear = mapOf(r).spawns.filter((x) => others.every((o) => Math.abs(o.x - x) > PLAYER_W || Math.abs(o.y - groundY) > PLAYER_H));
+  resetBody(r, p, pickRandom(clear.length ? clear : mapOf(r).spawns));
+  p.jumpWasDown = false;
+  p.dashWasDown = false;
+  r.players.set(ws.id, p);
+  broadcast(r, { t: 'notice', msg: `${p.name} joined` }); // before ws.room switches, so only the others see it
+  ws.room = r;
+  broadcastRoom(r);
+  send(ws, snapshot(r));
+  broadcastRoam();
+}
+
+function leaveRoam(ws) {
+  const r = ws.room;
+  if (!r?.free) return;
+  const p = r.players.get(ws.id);
+  r.players.delete(ws.id);
+  ws.room = mainRoom;
+  if (r.players.size === 0) {
+    roamRooms.delete(r.id); // the last one out ends the session
+  } else {
+    broadcastRoom(r);
+    if (p) broadcast(r, { t: 'notice', msg: `${p.name} left` });
+  }
+  broadcastRoam();
 }
 
 // ---------------------------------------------------------------------------
 // Physics
 // ---------------------------------------------------------------------------
-function stepPlayer(p, t) {
-  const world = currentWorld();
+function stepPlayer(r, p, t) {
+  const world = worldOf(r);
   const slow = t < p.slowUntil ? SLOW_MULT : 1;
   // Ride a moving platform: get carried by however far it moved this tick
-  const under = p.onGround ? livePlatforms[p.standingOn] : null;
+  const under = p.onGround ? r.livePlatforms[p.standingOn] : null;
   if (under && (under.dx || under.dy)) {
     p.x = Math.max(0, Math.min(world.width - PLAYER_W, p.x + under.dx));
     p.y += under.dy;
   }
 
-  const canMove = phase === 'playing' && t >= p.frozenUntil;
+  const canMove = r.phase === 'playing' && t >= p.frozenUntil;
   const input = canMove ? p.input : NO_INPUT;
 
   const dir = (input.right ? 1 : 0) - (input.left ? 1 : 0);
@@ -921,7 +1007,7 @@ function stepPlayer(p, t) {
   p.standingOn = -1;
   if (p.vy >= 0) {
     let landY = Infinity;
-    livePlatforms.forEach((pl, i) => {
+    r.livePlatforms.forEach((pl, i) => {
       const overlapsX = p.x + PLAYER_W > pl.x && p.x < pl.x + pl.w;
       // Compare against where the platform was too, so a rising platform can't slip past our feet
       const wasAbove = prevBottom <= Math.max(pl.y, pl.prevY) + 0.01;
@@ -942,11 +1028,11 @@ function stepPlayer(p, t) {
   }
   if (p.dashMode === 'slide' && !p.onGround) p.dashMode = null; // slid off a ledge
   if (p.dashMode === 'air' && p.onGround) p.dashMode = null; // landed mid-dash
-  if (p.y > world.height) resetBody(p, pickRandom(currentMap().spawns)); // safety net
-  if (phase === 'playing') {
-    checkPads(p);
-    checkTraps(p, t);
-    checkPortals(p);
+  if (p.y > world.height) resetBody(r, p, pickRandom(mapOf(r).spawns)); // safety net
+  if (r.phase === 'playing') {
+    checkPads(r, p);
+    checkTraps(r, p, t);
+    checkPortals(r, p);
   }
 }
 
@@ -962,8 +1048,8 @@ function overlaps(a, b) {
   return A.x < B.x + B.w && A.x + A.w > B.x && A.y < B.y + B.h && A.y + A.h > B.y;
 }
 
-function checkTag(active, t) {
-  const it = players.get(itId);
+function checkTag(r, active, t) {
+  const it = r.players.get(r.itId);
   if (!it || it.waiting || t < it.frozenUntil) return;
   for (const p of active) {
     if (p === it || t < p.immuneUntil) continue;
@@ -975,40 +1061,41 @@ function checkTag(active, t) {
       const away = Math.sign(p.x - it.x) || -it.facing;
       p.vx = away * SHIELD_BOUNCE;
       p.dashMode = null;
-      broadcast({ t: 'block', from: it.id, to: p.id, x: Math.round(p.x + PLAYER_W / 2), y: Math.round(p.y + PLAYER_H / 2), hidden: t < p.cloakUntil });
+      broadcast(r, { t: 'block', from: it.id, to: p.id, x: Math.round(p.x + PLAYER_W / 2), y: Math.round(p.y + PLAYER_H / 2), hidden: t < p.cloakUntil });
       return;
     }
-    itId = p.id;
+    r.itId = p.id;
     it.immuneUntil = t + IMMUNE_SECONDS;
     it.tags++;
     p.frozenUntil = t + FREEZE_SECONDS;
     p.dashMode = null;
     p.vx = 0;
-    if (mode === 'potato') phaseEndsAt = p.frozenUntil + fuseSeconds; // passing the potato resets its fuse
-    broadcast({ t: 'tag', from: it.id, to: p.id });
+    if (r.mode === 'potato') r.phaseEndsAt = p.frozenUntil + r.fuseSeconds; // passing the potato resets its fuse
+    broadcast(r, { t: 'tag', from: it.id, to: p.id });
     return;
   }
 }
 
-function tick() {
-  if (phase !== 'ready' && phase !== 'playing') return;
+function tick(r) {
+  if (r.phase !== 'ready' && r.phase !== 'playing') return;
   const t = nowSec();
-  if (phase === 'ready' && t >= phaseEndsAt) {
-    phase = 'playing';
-    phaseEndsAt = t + (mode === 'potato' ? fuseSeconds : roundSeconds);
-    broadcastRoom();
+  if (r.phase === 'ready' && t >= r.phaseEndsAt) {
+    r.phase = 'playing';
+    r.phaseEndsAt = t + (r.mode === 'potato' ? r.fuseSeconds : r.roundSeconds);
+    broadcastRoom(r);
   }
-  updatePlatforms(t);
-  const active = activePlayers();
-  for (const p of active) stepPlayer(p, t);
-  if (phase === 'playing') {
-    const it = players.get(itId);
+  updatePlatforms(r, t);
+  const active = activePlayers(r);
+  for (const p of active) stepPlayer(r, p, t);
+  if (r.phase === 'playing') {
+    updatePowerup(r, active, t);
+    if (r.free) return; // free roam: no clock and nobody is IT
+    const it = r.players.get(r.itId);
     if (it) it.itTime += DT;
-    checkTag(active, t);
-    updatePowerup(active, t);
-    if (t >= phaseEndsAt) {
-      if (mode === 'potato') explodePotato(t);
-      else endRound({ loser: players.get(itId) });
+    checkTag(r, active, t);
+    if (t >= r.phaseEndsAt) {
+      if (r.mode === 'potato') explodePotato(r, t);
+      else endRound(r, { loser: r.players.get(r.itId) });
     }
   }
 }
@@ -1023,10 +1110,11 @@ setInterval(() => {
   let stepped = false;
   while (accumulator >= TICK_MS) {
     accumulator -= TICK_MS;
-    tick();
+    for (const r of allRooms()) tick(r);
     stepped = true;
   }
-  if (stepped && (phase === 'ready' || phase === 'playing')) broadcast(snapshot());
+  if (!stepped) return;
+  for (const r of allRooms()) if (r.phase === 'ready' || r.phase === 'playing') broadcast(r, snapshot(r));
 }, 4);
 
 // ---------------------------------------------------------------------------
@@ -1035,88 +1123,109 @@ setInterval(() => {
 const wss = new WebSocketServer({ server });
 
 function handleMessage(ws, msg) {
+  const main = mainRoom;
+  // Lobby settings: only players who've joined the main game, and only between rounds
+  const canSet = main.players.has(ws.id) && main.phase === 'lobby';
   switch (msg.t) {
     case 'join': {
-      if (players.has(ws.id)) return;
-      if (players.size >= MAX_PLAYERS) {
+      if (ws.room !== main || main.players.has(ws.id)) return;
+      if (main.players.size >= MAX_PLAYERS) {
         return send(ws, { t: 'error', msg: `Game is full (${MAX_PLAYERS} players max).` });
       }
-      const name = String(msg.name ?? '').replace(/\s+/g, ' ').trim().slice(0, 12) || 'Player';
-      const used = new Set([...players.values()].map((p) => p.char));
-      const free = [...Array(CHARACTER_COUNT).keys()].filter((c) => !used.has(c));
-      const char = pickRandom(free);
       const p = {
         id: ws.id,
-        name,
-        char,
-        waiting: phase !== 'lobby',
+        name: cleanName(msg.name),
+        char: freeCharacter(main),
+        waiting: main.phase !== 'lobby',
         input: { ...NO_INPUT },
       };
-      const spawns = currentMap().spawns;
-      resetBody(p, spawns[players.size % spawns.length]);
-      players.set(ws.id, p);
-      broadcastRoom();
+      const spawns = mapOf(main).spawns;
+      resetBody(main, p, spawns[main.players.size % spawns.length]);
+      main.players.set(ws.id, p);
+      broadcastRoom(main);
       break;
     }
     case 'leave':
       removePlayer(ws.id);
       break;
     case 'roundLength': {
-      // Any joined player can change the round length while in the lobby
       const seconds = Number(msg.seconds);
-      if (!players.has(ws.id) || phase !== 'lobby' || !ROUND_OPTIONS.includes(seconds)) return;
-      roundSeconds = seconds;
-      broadcastRoom();
+      if (!canSet || !ROUND_OPTIONS.includes(seconds)) return;
+      main.roundSeconds = seconds;
+      broadcastRoom(main);
       break;
     }
     case 'mode':
-      // Any joined player can pick the game mode while in the lobby
-      if (!players.has(ws.id) || phase !== 'lobby' || !MODES.includes(msg.mode)) return;
-      mode = msg.mode;
-      broadcastRoom();
+      if (!canSet || !MODES.includes(msg.mode)) return;
+      main.mode = msg.mode;
+      broadcastRoom(main);
       break;
     case 'fuse': {
       // Hot potato fuse length: the lobby's +/- buttons send delta 1 or -1
-      if (!players.has(ws.id) || phase !== 'lobby') return;
+      if (!canSet) return;
       const delta = Math.sign(Number(msg.delta) || 0);
-      fuseSeconds = Math.max(FUSE_MIN, Math.min(FUSE_MAX, fuseSeconds + delta));
-      broadcastRoom();
+      main.fuseSeconds = Math.max(FUSE_MIN, Math.min(FUSE_MAX, main.fuseSeconds + delta));
+      broadcastRoom(main);
       break;
     }
     case 'map':
-      // Any joined player can pick the map while in the lobby
-      if (!players.has(ws.id) || phase !== 'lobby' || !Object.hasOwn(MAPS, msg.id)) return;
-      mapId = msg.id;
-      broadcastRoom();
+      if (!canSet || !Object.hasOwn(MAPS, msg.id)) return;
+      main.mapId = msg.id;
+      broadcastRoom(main);
       break;
     case 'avatar': {
       // Cycle to the next character nobody else is using (lobby only)
-      const p = players.get(ws.id);
-      if (!p || phase !== 'lobby') return;
-      const used = new Set([...players.values()].filter((o) => o !== p).map((o) => o.char));
+      const p = main.players.get(ws.id);
+      if (!p || main.phase !== 'lobby') return;
+      const used = new Set([...main.players.values()].filter((o) => o !== p).map((o) => o.char));
       const dir = msg.dir === -1 ? -1 : 1;
       let c = p.char;
       do c = (c + dir + CHARACTER_COUNT) % CHARACTER_COUNT;
       while (used.has(c));
       p.char = c;
-      broadcastRoom();
+      broadcastRoom(main);
       break;
     }
     case 'input': {
-      const p = players.get(ws.id);
+      const p = ws.room.players.get(ws.id);
       if (p) p.input = { left: !!msg.left, right: !!msg.right, jump: !!msg.jump, dash: !!msg.dash };
       break;
     }
     case 'start':
-      if (!players.has(ws.id) || phase !== 'lobby') return;
-      if (!startRound()) send(ws, { t: 'error', msg: 'Need at least 2 players to start.' });
+      if (!canSet) return;
+      if (!startRound(main)) send(ws, { t: 'error', msg: 'Need at least 2 players to start.' });
       break;
     case 'restart':
-      if (!players.has(ws.id) || phase !== 'ended') return;
-      if (!startRound()) toLobby();
+      if (!main.players.has(ws.id) || main.phase !== 'ended') return;
+      if (!startRound(main)) toLobby(main);
       break;
     case 'lobby':
-      if (players.has(ws.id) && phase === 'ended') toLobby();
+      if (main.players.has(ws.id) && main.phase === 'ended') toLobby(main);
+      break;
+    case 'roamNew': {
+      // Start a free roam session of your own on any map
+      if (ws.room.free) return;
+      if (main.players.has(ws.id) && main.phase !== 'lobby') return; // finish your round first
+      const r = createRoom({ id: nextRoamId++, free: true, mapId: Object.hasOwn(MAPS, msg.mapId) ? msg.mapId : main.mapId });
+      updatePlatforms(r, nowSec());
+      roamRooms.set(r.id, r);
+      enterRoam(ws, r, msg.name);
+      break;
+    }
+    case 'roamJoin': {
+      if (ws.room.free) return;
+      if (main.players.has(ws.id) && main.phase !== 'lobby') return;
+      const r = roamRooms.get(Number(msg.id));
+      if (!r) return send(ws, { t: 'error', msg: 'That free roam session has ended.' });
+      if (r.players.size >= MAX_PLAYERS) return send(ws, { t: 'error', msg: `That session is full (${MAX_PLAYERS} players max).` });
+      enterRoam(ws, r, msg.name);
+      break;
+    }
+    case 'roamLeave':
+      if (!ws.room.free) return;
+      leaveRoam(ws);
+      send(ws, roomMessage(main));
+      if (main.phase !== 'lobby') send(ws, snapshot(main));
       break;
   }
 }
@@ -1124,6 +1233,7 @@ function handleMessage(ws, msg) {
 wss.on('connection', (ws) => {
   ws.id = nextId++;
   ws.isAlive = true;
+  ws.room = mainRoom;
   clients.add(ws);
 
   ws.on('pong', () => {
@@ -1140,7 +1250,8 @@ wss.on('connection', (ws) => {
   });
   ws.on('close', () => {
     clients.delete(ws);
-    removePlayer(ws.id);
+    if (ws.room.free) leaveRoam(ws);
+    else removePlayer(ws.id);
   });
 
   send(ws, {
@@ -1155,8 +1266,9 @@ wss.on('connection', (ws) => {
     dashCooldown: DASH_COOLDOWN,
     slideHeight: SLIDE_H,
   });
-  send(ws, roomMessage());
-  if (phase !== 'lobby') send(ws, snapshot());
+  send(ws, roomMessage(mainRoom));
+  send(ws, roamMessage());
+  if (mainRoom.phase !== 'lobby') send(ws, snapshot(mainRoom));
 });
 
 // Drop sockets that silently vanished (e.g. a phone that went to sleep).

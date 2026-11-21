@@ -33,6 +33,7 @@ Scripts load in this order: `characters.js`, `maps.js`, `music.js`, `client.js`.
 
 ## How it works
 
+- **Rooms:** there's one main game (`mainRoom`: lobby, classic and hot potato) plus any number of free roam sessions (`roamRooms`). All game state lives on a room object `r` from `createRoom`, and game functions take `r`. Each socket views one room (`ws.room`, the main game by default), and `broadcast(r, msg)` only reaches sockets viewing `r`. Free roam rooms (`r.free`, `mode: 'free'`) are always `playing`, with no clock, no IT and no tags, and are deleted when their last player leaves.
 - **The server decides everything.** Each tick it steps every active player and broadcasts a full `snap`. Clients send only `input {left,right,jump,dash}`.
 - **Client smoothing:** clients render about 50ms in the past (`INTERP_DELAY_MS`), interpolating between snapshots. They don't interpolate across a teleport; they detect one when the `tp` counter changes.
 - **Server → client messages:**
@@ -40,12 +41,13 @@ Scripts load in this order: `characters.js`, `maps.js`, `music.js`, `client.js`.
   | Message | Contents |
   |---|---|
   | `welcome` | Constants, plus `maps: MAPS` (the client draws whatever layout the server sends). |
-  | `room` | Lobby or round state: phase, mode, settings, `players[]` with `waiting`, `out`, `wins`, and results. |
+  | `room` | State of the room you're viewing: `roomId` (0 is the main game), `free`, phase, mode, settings, `players[]` with `waiting`, `out`, `wins`, and results. |
+  | `roam` | The free roam sessions for the lobby list, sent to every socket whenever one changes. |
   | `snap` | Per-tick state. |
   | `tag`, `boom`, `powerup`, `notice`, `error` | One-off events. |
 
-- **Client → server messages:** `join`, `leave`, `input`, `start`, `restart`, `lobby`, `roundLength`, `mode`, `fuse` (`delta` ±1), `map`, `avatar`.
-- **Who can change settings:** lobby settings change only in the `lobby` phase and only for joined players.
+- **Client → server messages:** `join`, `leave`, `input`, `start`, `restart`, `lobby`, `roundLength`, `mode`, `fuse` (`delta` ±1), `map`, `avatar`, and for free roam `roamNew {name, mapId}`, `roamJoin {id, name}`, `roamLeave`.
+- **Who can change settings:** lobby settings change only in the `lobby` phase and only for players joined to the main game. The lobby's Free roam button is client-only (`roamView`); it never changes the main game's mode.
 - **Phases:** `lobby` → `ready` (3s countdown, nobody moves) → `playing` → `ended`.
 - **Classic mode:** whoever is IT when `phaseEndsAt` arrives loses.
 - **Hot potato** (`mode === 'potato'`): `phaseEndsAt` is when the fuse blows.
