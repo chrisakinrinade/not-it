@@ -716,14 +716,7 @@
     ctx.fillText(text, x, y);
   }
 
-  // How visible each cloaked player's shimmer is (0 = gone, 1 = faint shimmer).
-  // Running along the ground fades it out; standing still or jumping fades it back in.
-  const shimmer = new Map();
-  let lastShimmerTime = 0;
-
   function drawPlayers(state, time) {
-    const dt = Math.min(0.1, Math.max(0, time - lastShimmerTime));
-    lastShimmerTime = time;
     const world = worldOf(currentMap());
     const trapColors = themeFor(currentMap()).trap;
     // Draw IT last so it's always on top
@@ -744,21 +737,11 @@
       const cx = p.x + pSize.w / 2;
       const feetY = p.y + pSize.h;
       const isMe = p.id === myId;
-      // Invisibility cloak: others see only a faint shimmer; you see yourself see-through
-      const hidden = p.iv > 0 && !isMe;
-      let level = 1;
-      if (hidden) {
-        const runningOnGround = p.g && Math.abs(p.vx) > 30;
-        const prev = shimmer.get(p.id) ?? 1;
-        level = prev + ((runningOnGround ? 0 : 1) - prev) * Math.min(1, dt * 12); // ~0.1s fade
-        shimmer.set(p.id, level);
-        if (level < 0.03) continue; // fully invisible while running
-      } else {
-        shimmer.delete(p.id);
-      }
+      // Invisibility cloak: others see nothing at all; you see yourself see-through
+      if (p.iv > 0 && !isMe) continue;
       ctx.save();
-      if (p.iv > 0) ctx.globalAlpha = hidden ? 0.1 * level : 0.45;
-      if (p.sp > 0 && !hidden) {
+      if (p.iv > 0) ctx.globalAlpha = 0.45;
+      if (p.sp > 0) {
         // Speed boots: golden glow underfoot + speed lines when moving
         ctx.fillStyle = 'rgba(255, 224, 102, 0.5)';
         fillEllipse(ctx, cx, feetY - 1, 20, 4);
@@ -777,7 +760,7 @@
           ctx.stroke();
         }
       }
-      if (p.sl > 0 && !hidden) drawStuckFeet(ctx, trapColors, p, cx, feetY, time);
+      if (p.sl > 0) drawStuckFeet(ctx, trapColors, p, cx, feetY, time);
       if (p.dm === 1) {
         // Slide: squashed toward the feet, kicking up dust
         ctx.fillStyle = 'rgba(255, 255, 255, 0.45)';
@@ -807,17 +790,6 @@
         drawCharacter(ctx, info.char, p.x, p.y, pSize.w, pSize.h, opts);
       }
       ctx.restore();
-      if (hidden) {
-        // A few twinkles are the only giveaway; no name, badge or trail
-        ctx.fillStyle = `rgba(255, 255, 255, ${0.85 * level})`;
-        for (let k = 0; k < 3; k++) {
-          const ph = time * 1.7 + k * 2.1 + p.id;
-          const twinkle = Math.sin(ph * 2);
-          if (twinkle < 0.3) continue;
-          drawStar(ctx, cx + Math.sin(ph * 1.3) * 16, p.y + 6 + ((k * 13 + time * 10) % 30), 1.5 + 2 * twinkle);
-        }
-        continue;
-      }
       if (isIt && room.mode === 'potato') {
         const left = fuseLeft(state);
         drawPotato(ctx, cx + p.f * 21, p.y + (p.dm === 1 ? 30 : 22), 1, left / room.fuseSeconds, time, left < 3 && !state.ho);
@@ -969,6 +941,7 @@
       const prev = lastBoosts.get(p.id);
       lastBoosts.set(p.id, p.bc);
       if (prev === undefined || prev === p.bc || !pads.length) continue;
+      if (p.iv > 0 && p.id !== myId) continue; // don't give away an invisible player
       // The pad nearest this player's feet is the one that fired
       const cx = p.x + pSize.w / 2;
       let best = 0;
@@ -989,7 +962,7 @@
     for (const p of state.players) {
       const prev = lastTrapHits.get(p.id);
       lastTrapHits.set(p.id, p.tc);
-      if (prev === undefined || prev === p.tc || !traps.length || p.iv > 0) continue;
+      if (prev === undefined || prev === p.tc || !traps.length || (p.iv > 0 && p.id !== myId)) continue;
       const cx = p.x + pSize.w / 2;
       const feetY = p.y + pSize.h;
       const dist = (t) => Math.abs(t.x + t.w / 2 - cx) + Math.abs(t.y - feetY) * 4;
@@ -1008,7 +981,7 @@
       const prev = lastTeleports.get(p.id);
       lastTeleports.set(p.id, p.tp);
       if (prev === undefined || prev === p.tp) continue;
-      portalFlashUntil = performance.now() + 400;
+      if (p.iv <= 0 || p.id === myId) portalFlashUntil = performance.now() + 400; // no flash for an invisible player
       if (p.id === cameraTargetId(state)) cam.ready = false; // snap the view to the exit
       if (p.id === myId) Music.whoosh();
     }

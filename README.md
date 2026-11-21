@@ -27,7 +27,7 @@ If macOS asks whether to allow incoming connections for `node`, click **Allow**.
 - Jump pads (red-capped springs) launch you about four levels straight up: two on Meadow, a "tower express" up the middle of Starry Night, one by each wall in Sunset Canyon, two extra-strong wall pads on Frosty Peaks, and two on Jungle Ruins.
 - **Power-ups**: one appears on a random ledge 5s into the round, and a new one appears elsewhere 8s after each pickup. Anyone can grab them, IT included. It's randomly either:
   - **Speed boots** 👟 (gold bubble): run 50% faster for 6s, with a gold speed trail.
-  - **Invisibility cloak** 👻 (purple bubble): for 5s you're completely invisible to other players while running along the ground; standing still or jumping fades in a faint shimmer. No name, IT badge, trail or off-screen arrow either way. You see yourself see-through.
+  - **Invisibility cloak** 👻 (purple bubble): for 5s you're completely invisible to other players: no body, name, IT badge, trail or off-screen arrow, and jump pads, portals and traps don't react visibly when you use them. You see yourself see-through.
 - **Traps** (Frosty Peaks and Jungle Ruins): sticky puddles of slush or mud with a snail on them. Step in one and you run, slide and air-dash at half speed while you're in it and for 3s after you leave it. A 🐌 timer shows how long is left.
 - Black-hole portals come in linked pairs (same color = linked). Touch the middle of one to pop out of the other with your speed intact (jump over it to avoid it).
 - People who join mid-round watch and play from the next round.
