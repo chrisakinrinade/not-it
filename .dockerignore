@@ -2,3 +2,5 @@ node_modules
 .git
 .claude
 .gitignore
+AGENTS.md
+CLAUDE.md
