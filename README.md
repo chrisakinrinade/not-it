@@ -15,9 +15,9 @@ If macOS asks whether to allow incoming connections for `node`, click **Allow**.
 ## Play
 
 - Enter a name and **Join**. Once 2+ players are in, anyone can press **Start game**.
-- Any joined player can pick the game mode, the map (Meadow, Starry Night, Sunset Canyon, and the bigger Frosty Peaks, Jungle Ruins, Lava Caverns, Coral Reef, Candy Clouds and Neon City, marked **BIG**) and round length (10–180 seconds in 5s steps, set with a +/− stepper; default 60s) in the lobby.
+- Any joined player can pick the game mode, the map (Meadow, Starry Night, Sunset Canyon, and the bigger Frosty Peaks, Jungle Ruins, Lava Caverns, Coral Reef, Candy Clouds and Neon City, marked **BIG**) and round length (10–180 seconds in 5s steps, set with +/− buttons or a slider; default 60s) in the lobby.
 - **Classic tag**: a random player starts as **IT**. Touch someone to make them IT. Whoever is IT when the clock hits 0 loses.
-- **Hot potato** 🥔: whoever is IT holds a potato with a burning fuse (5–15s, set with the same +/− stepper in the lobby; press and hold either stepper to step quickly). Passing it on by tagging someone resets the fuse. When it runs out, the holder is knocked out and the potato goes to the nearest player left, who is frozen for a 3s countdown while everyone scatters. The last one standing wins (and is the only one who gets a 🏆). The fuse ticks faster as it burns down.
+- **Hot potato** 🥔: whoever is IT holds a potato with a burning fuse (5–15s, set with the same seconds picker in the lobby; press and hold +/− to step quickly, or drag the slider). Passing it on by tagging someone resets the fuse. When it runs out, the holder is knocked out and the potato goes to the nearest player left, who is frozen for a 3s countdown while everyone scatters. The last one standing wins (and is the only one who gets a 🏆). The fuse ticks faster as it burns down.
 - Knocked-out players, and anyone who joins mid-round, watch the game: the camera follows IT, or drag the view (touch/mouse) or use the arrow keys to look around. **Follow** snaps back to IT.
 - A newly tagged player is frozen for 1s, and the tagger can't be tagged straight back for 2s.
 - Keyboard: ← → to run, ↑ or Space to jump (WASD also works). Tap jump for a short hop, hold for a high jump.
