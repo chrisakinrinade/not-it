@@ -38,17 +38,22 @@
         <div id="mapOptions" class="map-options" role="radiogroup" aria-labelledby="mapLabel"></div>
       </div>
 
-      <div class="round-length">
+      <div class="seconds-picker round-length" id="roundPicker">
         <span class="round-label" id="roundLabel">Round length</span>
-        <div id="roundOptions" class="segmented" role="radiogroup" aria-labelledby="roundLabel"></div>
+        <div class="stepper" role="group" aria-labelledby="roundLabel">
+          <button type="button" class="step-up" aria-label="Longer round">+</button>
+          <output class="step-value" aria-live="polite">60</output>
+          <button type="button" class="step-down" aria-label="Shorter round">−</button>
+        </div>
+        <span class="stepper-unit">seconds</span>
       </div>
 
-      <div class="fuse-length" hidden>
+      <div class="seconds-picker fuse-length" id="fusePicker" hidden>
         <span class="round-label" id="fuseLabel">Fuse length</span>
         <div class="stepper" role="group" aria-labelledby="fuseLabel">
-          <button type="button" id="fuseUp" aria-label="Longer fuse">+</button>
-          <output id="fuseValue" aria-live="polite">15</output>
-          <button type="button" id="fuseDown" aria-label="Shorter fuse">−</button>
+          <button type="button" class="step-up" aria-label="Longer fuse">+</button>
+          <output class="step-value" aria-live="polite">15</output>
+          <button type="button" class="step-down" aria-label="Shorter fuse">−</button>
         </div>
         <span class="stepper-unit">seconds</span>
       </div>

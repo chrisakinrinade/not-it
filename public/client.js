@@ -18,7 +18,6 @@
   let view = { width: 960, height: 540 };
   let maps = {}; // id -> { name, theme, platforms, portals }
   let pSize = { w: 34, h: 38 };
-  let roundOptions = [30, 60, 90, 120, 180];
   let dashCooldown = 1.5;
   let maxPlayers = 8;
   let room = { phase: 'lobby', players: [], itId: null, loserId: null, loserName: null };
@@ -83,7 +82,6 @@
         view = m.view || m.world;
         maps = m.maps;
         pSize = m.player;
-        roundOptions = m.roundOptions || roundOptions;
         dashCooldown = m.dashCooldown || dashCooldown;
         maxPlayers = m.maxPlayers || maxPlayers;
         snaps.length = 0;
@@ -270,10 +268,11 @@
         ? "Don't be holding the <strong>potato</strong> when it blows. Last one standing wins!"
         : 'Whoever is <strong>IT</strong> when the clock runs out loses.';
     renderModeOptions();
-    renderRoundOptions();
-    renderFuse();
-    $('.round-length').hidden = potato || roamView;
-    $('.fuse-length').hidden = !potato || roamView;
+    const canEdit = joined && room.phase === 'lobby';
+    roundPicker.render(room.roundSeconds ?? 60, room.roundRange || [10, 180], canEdit);
+    fusePicker.render(room.fuseSeconds ?? 15, room.fuseRange || [5, 15], canEdit);
+    $('#roundPicker').hidden = potato || roamView;
+    $('#fusePicker').hidden = !potato || roamView;
     renderMapOptions();
     renderRoam();
 
@@ -391,7 +390,6 @@
     if (e.code === 'KeyM' && !e.repeat && !(e.target instanceof HTMLInputElement)) toggleMute();
   });
 
-  const formatRound = (secs) => (secs < 60 ? `${secs}s` : `${secs / 60} min`.replace('1.5 min', '1½ min'));
 
   const ordinal = (n) => n + (n % 10 === 1 && n !== 11 ? 'st' : n % 10 === 2 && n !== 12 ? 'nd' : n % 10 === 3 && n !== 13 ? 'rd' : 'th');
 
@@ -508,54 +506,42 @@
     send({ ...msg, name });
   }
 
-  // The fuse stepper is static markup (rebuilding it would break press-and-hold)
-  function renderFuse() {
-    const canEdit = joined && room.phase === 'lobby';
-    const [lo, hi] = room.fuseRange || [5, 30];
-    const secs = room.fuseSeconds ?? 15;
-    $('#fuseValue').textContent = secs;
-    $('#fuseUp').disabled = !canEdit || secs >= hi;
-    $('#fuseDown').disabled = !canEdit || secs <= lo;
-    $('#fuseLabel').textContent = canEdit ? 'Fuse length' : 'Fuse length (join to change)';
-  }
-
-  // Press and hold + or − to keep stepping
-  let fuseRepeat = null;
-  const stopFuseRepeat = () => {
-    clearTimeout(fuseRepeat);
-    fuseRepeat = null;
-  };
-  for (const [sel, delta] of [['#fuseUp', 1], ['#fuseDown', -1]]) {
-    const btn = $(sel);
-    const step = () => send({ t: 'fuse', delta });
-    btn.addEventListener('pointerdown', (e) => {
-      if (btn.disabled) return;
-      e.preventDefault();
-      step();
-      stopFuseRepeat();
-      const again = (ms) => { fuseRepeat = setTimeout(() => { step(); again(90); }, ms); };
-      again(400);
-    });
-    btn.addEventListener('click', (e) => { if (e.detail === 0) step(); }); // keyboard activation
-  }
-  for (const ev of ['pointerup', 'pointercancel', 'blur']) addEventListener(ev, stopFuseRepeat);
-
-  function renderRoundOptions() {
-    const box = $('#roundOptions');
-    const canEdit = joined && room.phase === 'lobby';
-    box.replaceChildren();
-    for (const secs of roundOptions) {
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.setAttribute('role', 'radio');
-      btn.setAttribute('aria-checked', String(secs === room.roundSeconds));
-      btn.textContent = formatRound(secs);
-      btn.disabled = !canEdit;
-      btn.addEventListener('click', () => send({ t: 'roundLength', seconds: secs }));
-      box.append(btn);
+  // A seconds picker: a static +/- stepper (rebuilding it would break press-and-hold) that
+  // sends `{ t: msgType, delta: ±1 }`; the server owns the step size and the limits.
+  function secondsPicker(root, msgType, label) {
+    const up = root.querySelector('.step-up');
+    const down = root.querySelector('.step-down');
+    const value = root.querySelector('.step-value');
+    let repeat = null;
+    const stop = () => {
+      clearTimeout(repeat);
+      repeat = null;
+    };
+    for (const [btn, delta] of [[up, 1], [down, -1]]) {
+      const step = () => send({ t: msgType, delta });
+      // Press and hold to keep stepping
+      btn.addEventListener('pointerdown', (e) => {
+        if (btn.disabled) return;
+        e.preventDefault();
+        step();
+        stop();
+        const again = (ms) => { repeat = setTimeout(() => { if (btn.disabled) return stop(); step(); again(90); }, ms); };
+        again(400);
+      });
+      btn.addEventListener('click', (e) => { if (e.detail === 0) step(); }); // keyboard activation
     }
-    $('#roundLabel').textContent = canEdit ? 'Round length' : 'Round length (join to change)';
+    for (const ev of ['pointerup', 'pointercancel', 'blur']) addEventListener(ev, stop);
+    return {
+      render(secs, [lo, hi], canEdit) {
+        value.textContent = secs;
+        up.disabled = !canEdit || secs >= hi;
+        down.disabled = !canEdit || secs <= lo;
+        root.querySelector('.round-label').textContent = canEdit ? label : `${label} (join to change)`;
+      },
+    };
   }
+  const roundPicker = secondsPicker($('#roundPicker'), 'roundLength', 'Round length');
+  const fusePicker = secondsPicker($('#fusePicker'), 'fuse', 'Fuse length');
 
   function renderMapOptions() {
     const box = $('#mapOptions');

@@ -387,7 +387,10 @@ const MAX_PLAYERS = 8; // per room, including each free roam session
 const CHARACTER_COUNT = 10; // must match CHARACTERS in public/characters.js
 // In-round music; names must match the round songs in public/music.js
 const ROUND_TRACKS = ['game', 'chase', 'bounce', 'sprint'];
-const ROUND_OPTIONS = [30, 60, 90, 120, 180]; // choices offered in the lobby
+// Lobby time settings, in whole seconds: [min, max] and how far one +/- press moves
+const ROUND_MIN = 10;
+const ROUND_MAX = 180;
+const ROUND_STEP = 5;
 const START_ROUND_SECONDS = Number(process.env.ROUND_SECONDS) || 60;
 const READY_SECONDS = 3;
 const FREEZE_SECONDS = 1; // newly-tagged player can't move
@@ -396,7 +399,8 @@ const FREEZE_SECONDS = 1; // newly-tagged player can't move
 // Free roam isn't one of these: it runs in its own sessions, alongside the main game.
 const MODES = ['classic', 'potato'];
 const FUSE_MIN = 5;
-const FUSE_MAX = 30;
+const FUSE_MAX = 15;
+const FUSE_STEP = 1;
 const HANDOFF_SECONDS = 3; // after a boom, the new holder is frozen this long so everyone can scatter
 const IMMUNE_SECONDS = 2; // tagger can't be tagged straight back
 
@@ -537,6 +541,7 @@ function roomMessage(r) {
     free: r.free,
     phase: r.phase,
     roundSeconds: r.roundSeconds,
+    roundRange: [ROUND_MIN, ROUND_MAX],
     mode: r.mode,
     fuseSeconds: r.fuseSeconds,
     fuseRange: [FUSE_MIN, FUSE_MAX],
@@ -885,6 +890,16 @@ function cleanName(name) {
   return String(name ?? '').replace(/\s+/g, ' ').trim().slice(0, 12) || 'Player';
 }
 
+// A lobby time setting: `delta` (±1) moves it one step, or `seconds` sets it outright.
+// Either way the result is whole seconds clamped to [lo, hi]; junk leaves it unchanged.
+function stepSeconds(current, msg, lo, hi, step) {
+  const v = msg.seconds !== undefined
+    ? (typeof msg.seconds === 'number' ? msg.seconds : NaN)
+    : current + Math.sign(Number(msg.delta) || 0) * step;
+  if (!Number.isFinite(v)) return current;
+  return Math.max(lo, Math.min(hi, Math.round(v)));
+}
+
 // A character nobody else in the room is using
 function freeCharacter(r) {
   const used = new Set([...r.players.values()].map((p) => p.char));
@@ -1170,26 +1185,21 @@ function handleMessage(ws, msg) {
     case 'leave':
       removePlayer(ws.id);
       break;
-    case 'roundLength': {
-      const seconds = Number(msg.seconds);
-      if (!canSet || !ROUND_OPTIONS.includes(seconds)) return;
-      main.roundSeconds = seconds;
+    case 'roundLength':
+      if (!canSet) return;
+      main.roundSeconds = stepSeconds(main.roundSeconds, msg, ROUND_MIN, ROUND_MAX, ROUND_STEP);
       broadcastRoom(main);
       break;
-    }
     case 'mode':
       if (!canSet || !MODES.includes(msg.mode)) return;
       main.mode = msg.mode;
       broadcastRoom(main);
       break;
-    case 'fuse': {
-      // Hot potato fuse length: the lobby's +/- buttons send delta 1 or -1
+    case 'fuse':
       if (!canSet) return;
-      const delta = Math.sign(Number(msg.delta) || 0);
-      main.fuseSeconds = Math.max(FUSE_MIN, Math.min(FUSE_MAX, main.fuseSeconds + delta));
+      main.fuseSeconds = stepSeconds(main.fuseSeconds, msg, FUSE_MIN, FUSE_MAX, FUSE_STEP);
       broadcastRoom(main);
       break;
-    }
     case 'map':
       if (!canSet || !Object.hasOwn(MAPS, msg.id)) return;
       main.mapId = msg.id;
@@ -1283,7 +1293,6 @@ wss.on('connection', (ws) => {
     view: VIEW,
     maps: MAPS,
     player: { w: PLAYER_W, h: PLAYER_H },
-    roundOptions: ROUND_OPTIONS,
     maxPlayers: MAX_PLAYERS,
     dashCooldown: DASH_COOLDOWN,
     slideHeight: SLIDE_H,

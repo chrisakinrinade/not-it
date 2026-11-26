@@ -285,8 +285,7 @@ body.touch .touch-hint { display: inline; }
 }
 .change-hint { color: var(--accent); }
 
-/* Round length picker */
-.round-length { margin-top: 16px; }
+/* Lobby labels and the mode picker's segmented control */
 .round-label { display: block; font-size: 0.8rem; font-weight: 700; color: var(--muted); margin-bottom: 6px; }
 .segmented {
   display: flex;
@@ -386,8 +385,8 @@ body.touch .touch-hint { display: inline; }
 /* Game mode picker */
 .mode-picker { margin-top: 16px; }
 
-/* Hot potato fuse length: a tall +/- stepper */
-.fuse-length { margin-top: 16px; display: flex; flex-direction: column; align-items: center; }
+/* Seconds pickers (round length, hot potato fuse): a tall +/- stepper */
+.seconds-picker { margin-top: 16px; display: flex; flex-direction: column; align-items: center; }
 .stepper {
   display: flex;
   flex-direction: column;
@@ -410,9 +409,9 @@ body.touch .touch-hint { display: inline; }
 }
 .stepper button:active:not(:disabled) { transform: none; box-shadow: none; background: linear-gradient(#d9dde3, #eef0f3); }
 .stepper button:disabled { opacity: 1; color: #c3c8d0; }
-#fuseUp { border-bottom: 1px solid #b8bec8; }
-#fuseDown { border-top: 1px solid #b8bec8; }
-#fuseValue {
+.stepper .step-up { border-bottom: 1px solid #b8bec8; }
+.stepper .step-down { border-top: 1px solid #b8bec8; }
+.stepper .step-value {
   display: block;
   height: 56px;
   line-height: 56px;
