@@ -40,22 +40,28 @@
 
       <div class="seconds-picker round-length" id="roundPicker">
         <span class="round-label" id="roundLabel">Round length</span>
-        <div class="stepper" role="group" aria-labelledby="roundLabel">
-          <button type="button" class="step-up" aria-label="Longer round">+</button>
-          <output class="step-value" aria-live="polite">60</output>
-          <button type="button" class="step-down" aria-label="Shorter round">−</button>
+        <div class="secs-box" role="group" aria-labelledby="roundLabel">
+          <div class="secs-row">
+            <button type="button" class="step-down" aria-label="Shorter round">−</button>
+            <output class="step-value" aria-live="polite"><span class="secs-num">60</span><span class="secs-unit">sec</span></output>
+            <button type="button" class="step-up" aria-label="Longer round">+</button>
+          </div>
+          <input type="range" class="secs-slider" aria-labelledby="roundLabel">
+          <div class="secs-scale"><span class="secs-lo"></span><span class="secs-hi"></span></div>
         </div>
-        <span class="stepper-unit">seconds</span>
       </div>
 
       <div class="seconds-picker fuse-length" id="fusePicker" hidden>
         <span class="round-label" id="fuseLabel">Fuse length</span>
-        <div class="stepper" role="group" aria-labelledby="fuseLabel">
-          <button type="button" class="step-up" aria-label="Longer fuse">+</button>
-          <output class="step-value" aria-live="polite">15</output>
-          <button type="button" class="step-down" aria-label="Shorter fuse">−</button>
+        <div class="secs-box" role="group" aria-labelledby="fuseLabel">
+          <div class="secs-row">
+            <button type="button" class="step-down" aria-label="Shorter fuse">−</button>
+            <output class="step-value" aria-live="polite"><span class="secs-num">15</span><span class="secs-unit">sec</span></output>
+            <button type="button" class="step-up" aria-label="Longer fuse">+</button>
+          </div>
+          <input type="range" class="secs-slider" aria-labelledby="fuseLabel">
+          <div class="secs-scale"><span class="secs-lo"></span><span class="secs-hi"></span></div>
         </div>
-        <span class="stepper-unit">seconds</span>
       </div>
 
       <p id="lobbyStatus" class="status"></p>

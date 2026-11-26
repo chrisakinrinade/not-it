@@ -269,8 +269,8 @@
         : 'Whoever is <strong>IT</strong> when the clock runs out loses.';
     renderModeOptions();
     const canEdit = joined && room.phase === 'lobby';
-    roundPicker.render(room.roundSeconds ?? 60, room.roundRange || [10, 180], canEdit);
-    fusePicker.render(room.fuseSeconds ?? 15, room.fuseRange || [5, 15], canEdit);
+    roundPicker.render(room.roundSeconds ?? 60, room.roundRange || [10, 180], room.roundStep || 5, canEdit);
+    fusePicker.render(room.fuseSeconds ?? 15, room.fuseRange || [5, 15], room.fuseStep || 1, canEdit);
     $('#roundPicker').hidden = potato || roamView;
     $('#fusePicker').hidden = !potato || roamView;
     renderMapOptions();
@@ -506,20 +506,24 @@
     send({ ...msg, name });
   }
 
-  // A seconds picker: a static +/- stepper (rebuilding it would break press-and-hold) that
-  // sends `{ t: msgType, delta: ±1 }`; the server owns the step size and the limits.
+  // A seconds picker: +/- buttons (press and hold to repeat) around the value, plus a slider
+  // for big jumps. It's static markup because rebuilding it would break press-and-hold and
+  // slider drags. Buttons send `{ t: msgType, delta: ±1 }` and the slider sends `{ seconds }`;
+  // the server owns the step size and the limits.
   function secondsPicker(root, msgType, label) {
     const up = root.querySelector('.step-up');
     const down = root.querySelector('.step-down');
-    const value = root.querySelector('.step-value');
+    const num = root.querySelector('.secs-num');
+    const slider = root.querySelector('.secs-slider');
     let repeat = null;
+    let dragging = false;
+    let sent = null;
     const stop = () => {
       clearTimeout(repeat);
       repeat = null;
     };
     for (const [btn, delta] of [[up, 1], [down, -1]]) {
       const step = () => send({ t: msgType, delta });
-      // Press and hold to keep stepping
       btn.addEventListener('pointerdown', (e) => {
         if (btn.disabled) return;
         e.preventDefault();
@@ -531,11 +535,39 @@
       btn.addEventListener('click', (e) => { if (e.detail === 0) step(); }); // keyboard activation
     }
     for (const ev of ['pointerup', 'pointercancel', 'blur']) addEventListener(ev, stop);
+
+    const showFill = () => {
+      const lo = Number(slider.min);
+      const span = Number(slider.max) - lo || 1;
+      slider.style.setProperty('--fill', `${((Number(slider.value) - lo) / span) * 100}%`);
+    };
+    // While dragging, show the slider's value and ignore the server echoing older ones
+    slider.addEventListener('pointerdown', () => { dragging = true; });
+    slider.addEventListener('input', () => {
+      const secs = Number(slider.value);
+      num.textContent = secs;
+      showFill();
+      if (secs !== sent) send({ t: msgType, seconds: (sent = secs) });
+    });
+    slider.addEventListener('change', () => { dragging = false; sent = null; });
+    addEventListener('pointerup', () => { dragging = false; });
+
     return {
-      render(secs, [lo, hi], canEdit) {
-        value.textContent = secs;
+      render(secs, [lo, hi], step, canEdit) {
+        root.classList.toggle('locked', !canEdit);
         up.disabled = !canEdit || secs >= hi;
         down.disabled = !canEdit || secs <= lo;
+        slider.disabled = !canEdit;
+        slider.min = lo;
+        slider.max = hi;
+        slider.step = step;
+        root.querySelector('.secs-lo').textContent = `${lo}s`;
+        root.querySelector('.secs-hi').textContent = `${hi}s`;
+        if (!dragging) {
+          num.textContent = secs;
+          slider.value = secs;
+        }
+        showFill();
         root.querySelector('.round-label').textContent = canEdit ? label : `${label} (join to change)`;
       },
     };
