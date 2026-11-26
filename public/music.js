@@ -16,7 +16,6 @@ const Music = (() => {
   let muted = false;
   try { muted = localStorage.getItem('tagMuted') === '1'; } catch {}
 
-  let requested = null; // what the client asked for ('game' means any round track)
   let desired = null; // song name we want playing (may be set before unlock)
   let current = null;
   let timer = null;
@@ -142,7 +141,7 @@ const Music = (() => {
         if (s % 4 === 2) hat(t, 0.035);
       },
     },
-    // In-round tracks: play('game') picks one at random each round.
+    // In-round tracks: the server picks one per round (ROUND_TRACKS in server.js).
     game: roundSong({
       bpm: 140, roots: ROOTS, melody: GAME_MELODY,
       kicks: [0, 8, 10], bass: [1, 2, 1, 2, 1, 2, 1, 2],
@@ -262,24 +261,15 @@ const Music = (() => {
     if (ctx.state === 'suspended' && !document.hidden) ctx.resume();
   }
 
-  const ROUND_SONGS = ['game', 'chase', 'bounce', 'sprint'];
-  let lastRoundSong = null;
-  function pickRoundSong() {
-    const choices = ROUND_SONGS.filter((n) => n !== lastRoundSong);
-    lastRoundSong = choices[Math.floor(Math.random() * choices.length)];
-    return lastRoundSong;
-  }
-
   function play(name) {
-    if (requested === name) return;
-    requested = name;
-    desired = name === 'game' ? pickRoundSong() : name;
+    if (!SONGS[name]) name = 'game'; // e.g. a newer server naming a track this client lacks
+    if (desired === name) return;
+    desired = name;
     tempoMul = 1;
     startDesired();
   }
 
   function jingle(win) {
-    requested = null;
     desired = null;
     stopScheduler();
     if (!ctx) return;

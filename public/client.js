@@ -357,7 +357,7 @@
   }
 
   function updateMusic(inGame) {
-    const musicPhase = !inGame ? 'lobby' : room.phase === 'ended' ? 'ended' : 'game';
+    const musicPhase = !inGame ? 'lobby' : room.phase === 'ended' ? 'ended' : room.track || 'game';
     if (musicPhase === lastMusicPhase) return;
     lastMusicPhase = musicPhase;
     if (musicPhase === 'ended') {

@@ -385,6 +385,8 @@ const TAG_INSET = 3; // shrink hitboxes slightly so tags feel fair
 
 const MAX_PLAYERS = 8; // per room, including each free roam session
 const CHARACTER_COUNT = 10; // must match CHARACTERS in public/characters.js
+// In-round music; names must match the round songs in public/music.js
+const ROUND_TRACKS = ['game', 'chase', 'bounce', 'sprint'];
 const ROUND_OPTIONS = [30, 60, 90, 120, 180]; // choices offered in the lobby
 const START_ROUND_SECONDS = Number(process.env.ROUND_SECONDS) || 60;
 const READY_SECONDS = 3;
@@ -503,6 +505,7 @@ function createRoom({ id, free = false, mapId = 'meadow' }) {
     nextPowerupAt: free ? nowSec() + POWERUP_FIRST_DELAY : Infinity,
     livePlatforms: [],
     liveMapId: null,
+    track: free ? pickRandom(ROUND_TRACKS) : null, // in-round music, picked here so everyone hears the same one
   };
 }
 
@@ -538,6 +541,7 @@ function roomMessage(r) {
     fuseSeconds: r.fuseSeconds,
     fuseRange: [FUSE_MIN, FUSE_MAX],
     mapId: r.mapId,
+    track: r.track,
     itId: r.itId,
     loserId: r.loserId,
     loserName: r.loserName,
@@ -761,6 +765,7 @@ function startRound(r) {
   r.winnerName = null;
   r.handoffUntil = 0;
   r.outCount = 0;
+  r.track = pickRandom(ROUND_TRACKS.filter((t) => t !== r.track));
   r.phase = 'ready';
   r.phaseEndsAt = nowSec() + READY_SECONDS;
   r.powerup = null;

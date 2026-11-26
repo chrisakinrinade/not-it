@@ -95,6 +95,7 @@ Scripts load in this order: `characters.js`, `maps.js`, `music.js`, `client.js`.
 
   Check `p.iv > 0 && p.id !== myId` wherever you add a visual effect.
 - `CHARACTER_COUNT` in server.js must equal `CHARACTERS.length` in characters.js.
+- `ROUND_TRACKS` in server.js must name songs in `SONGS` in music.js. The server picks each round's track (`track` in the `room` message) so every player hears the same one.
 - **Adding a power-up** takes four changes:
   1. Add it to `POWERUP_KINDS`.
   2. Apply its effect in `updatePowerup`.
